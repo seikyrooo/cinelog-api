@@ -43,6 +43,10 @@ func main() {
 		},
 	}))
 
+	// Ensure uploads directories exist on startup
+	_ = os.MkdirAll("./uploads/posters", 0755)
+	_ = os.MkdirAll("./uploads/backdrops", 0755)
+
 	// Serve Static Uploaded Images (Posters & Backdrops) locally from VPS
 	app.Static("/uploads", "./uploads")
 
