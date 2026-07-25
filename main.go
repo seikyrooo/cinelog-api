@@ -3,12 +3,15 @@ package main
 import (
     "log"
     "os"
+    "time"
 
     "cinelog-api/database"
     "cinelog-api/controllers"
+    "cinelog-api/middlewares"
 
     "github.com/gofiber/fiber/v2"
     "github.com/gofiber/fiber/v2/middleware/logger"
+    "github.com/gofiber/fiber/v2/middleware/limiter"
     "github.com/joho/godotenv"
 )
 
@@ -41,6 +44,29 @@ func main() {
             "status": "Running smoothly!",
         })
     })
+    // Grup Route Authentication
+    authGroup := app.Group("/api/auth")
+    authGroup.Post("/register", controllers.Register)
+    authGroup.Post("/login", controllers.Login)
+
+    // --- GRUP ROUTE YANG DILINDUNGI (PRIVATE) ---
+	privateGroup := app.Group("/api/user")
+    
+    // Pasang Middleware "Satpam" ke dalam grup ini
+	privateGroup.Use(middlewares.Protected())
+
+	// Endpoint Test: Hanya bisa dibuka jika bawa Token valid
+	privateGroup.Get("/profile", func(c *fiber.Ctx) error {
+		// Ambil user_id yang tadi disimpan oleh middleware
+		userID := c.Locals("user_id")
+
+		return c.JSON(fiber.Map{
+			"message": "Selamat datang di area rahasia!",
+			"user_id": userID,
+		})
+	})
+
+    // Route Search Movies
     app.Get("/api/search", controllers.SearchMovies)
 
     port := os.Getenv("PORT")
