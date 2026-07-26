@@ -111,9 +111,20 @@ func GetMediaDetail(c *fiber.Ctx) error {
 	if mediaType == "tv" {
 		var creators []string
 		for _, creator := range detail.CreatedBy {
-			creators = append(creators, creator.Name)
+			if creator.Name != "" {
+				creators = append(creators, creator.Name)
+			}
 		}
-		director = strings.Join(creators, ", ")
+		if len(creators) > 0 {
+			director = strings.Join(creators, ", ")
+		} else if detail.Credits != nil {
+			for _, crew := range detail.Credits.Crew {
+				if crew.Job == "Executive Producer" || crew.Job == "Director" || crew.Job == "Writer" {
+					director = crew.Name
+					break
+				}
+			}
+		}
 	} else if detail.Credits != nil {
 		for _, crew := range detail.Credits.Crew {
 			if crew.Job == "Director" {
@@ -150,6 +161,13 @@ func GetMediaDetail(c *fiber.Ctx) error {
 		nextEpsName = detail.NextEpisodeToAir.Name
 	}
 
+	var seasonsList []models.TMDBSeasonItem
+	for _, s := range detail.Seasons {
+		if s.SeasonNumber > 0 {
+			seasonsList = append(seasonsList, s)
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
@@ -168,6 +186,7 @@ func GetMediaDetail(c *fiber.Ctx) error {
 			"next_air_date":      nextAirDate,
 			"next_episode_name": nextEpsName,
 			"media_status":      detail.Status,
+			"seasons":           seasonsList,
 		},
 	})
 }

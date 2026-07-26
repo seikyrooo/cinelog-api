@@ -273,6 +273,53 @@ func IncrementEpisodeProgress(c *fiber.Ctx) error {
 	})
 }
 
+type SetProgressInput struct {
+	SeasonWatched   int `json:"season_watched"`
+	EpisodesWatched int `json:"episodes_watched"`
+}
+
+// SetEpisodeWatchedProgress sets exact episode & season watched count
+func SetEpisodeWatchedProgress(c *fiber.Ctx) error {
+	userIDVal := c.Locals("user_id")
+	if userIDVal == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+	userID := uint(userIDVal.(float64))
+
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ID tidak valid"})
+	}
+
+	var input SetProgressInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Input JSON tidak valid"})
+	}
+
+	var userList models.UserList
+	if err := database.DB.Preload("Movie").Where("id = ? AND user_id = ?", id, userID).First(&userList).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Item watchlist tidak ditemukan"})
+	}
+
+	if input.SeasonWatched > 0 {
+		userList.SeasonWatched = input.SeasonWatched
+	}
+	userList.EpisodesWatched = input.EpisodesWatched
+
+	if userList.TotalEpisodes > 0 && userList.EpisodesWatched >= userList.TotalEpisodes {
+		userList.Status = "completed"
+	} else if userList.EpisodesWatched > 0 && userList.Status == "plan_to_watch" {
+		userList.Status = "watching"
+	}
+
+	database.DB.Save(&userList)
+
+	return c.JSON(fiber.Map{
+		"message": "Progres episode berhasil diperbarui",
+		"data":    userList,
+	})
+}
+
 // DeleteWatchlistItem removes an item from user's list
 func DeleteWatchlistItem(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")

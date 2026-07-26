@@ -81,6 +81,7 @@ func main() {
 	privateGroup.Post("/watchlist", controllers.AddToWatchlist)
 	privateGroup.Put("/watchlist/:id", controllers.UpdateWatchlistItem)
 	privateGroup.Put("/watchlist/:id/progress", controllers.IncrementEpisodeProgress)
+	privateGroup.Put("/watchlist/:id/set-progress", controllers.SetEpisodeWatchedProgress)
 	privateGroup.Delete("/watchlist/:id", controllers.DeleteWatchlistItem)
 	privateGroup.Get("/watchlist/check/:tmdbId", controllers.CheckWatchlistItem)
 

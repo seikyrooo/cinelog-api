@@ -42,6 +42,15 @@ type TMDBNextEpisode struct {
 	SeasonNumber  int    `json:"season_number"`
 }
 
+type TMDBSeasonItem struct {
+	ID           int    `json:"id"`
+	SeasonNumber int    `json:"season_number"`
+	Name         string `json:"name"`
+	EpisodeCount int    `json:"episode_count"`
+	AirDate      string `json:"air_date"`
+	PosterPath   string `json:"poster_path"`
+}
+
 type TMDBDetail struct {
 	ID                 int              `json:"id"`
 	Title              string           `json:"title,omitempty"`
@@ -60,4 +69,5 @@ type TMDBDetail struct {
 	CreatedBy          []struct {
 		Name string `json:"name"`
 	} `json:"created_by"`
+	Seasons []TMDBSeasonItem `json:"seasons"`
 }
