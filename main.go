@@ -49,6 +49,7 @@ func main() {
 
 	// Serve Static Uploaded Images (Posters & Backdrops) locally from VPS
 	app.Static("/uploads", "./uploads")
+	app.Static("/api/uploads", "./uploads")
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -62,6 +63,7 @@ func main() {
 	authGroup.Post("/login", controllers.Login)
 
 	app.Get("/api/search", controllers.SearchMovies)
+	app.Get("/api/detail", controllers.GetMediaDetail)
 
 	privateGroup := app.Group("/api/user")
 	privateGroup.Use(middlewares.Protected())
@@ -77,6 +79,7 @@ func main() {
 	privateGroup.Get("/watchlist", controllers.GetWatchlist)
 	privateGroup.Post("/watchlist", controllers.AddToWatchlist)
 	privateGroup.Put("/watchlist/:id", controllers.UpdateWatchlistItem)
+	privateGroup.Put("/watchlist/:id/progress", controllers.IncrementEpisodeProgress)
 	privateGroup.Delete("/watchlist/:id", controllers.DeleteWatchlistItem)
 	privateGroup.Get("/watchlist/check/:tmdbId", controllers.CheckWatchlistItem)
 
