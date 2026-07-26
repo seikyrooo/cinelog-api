@@ -171,3 +171,48 @@ func GetMediaDetail(c *fiber.Ctx) error {
 		},
 	})
 }
+
+type TMDBSeasonEpisode struct {
+	AirDate       string  `json:"air_date"`
+	EpisodeNumber int     `json:"episode_number"`
+	Name          string  `json:"name"`
+	Overview      string  `json:"overview"`
+	StillPath     string  `json:"still_path"`
+	VoteAverage   float64 `json:"vote_average"`
+}
+
+type TMDBSeasonResponse struct {
+	Episodes []TMDBSeasonEpisode `json:"episodes"`
+}
+
+func GetTVSeasonEpisodes(c *fiber.Ctx) error {
+	idStr := c.Query("id")
+	seasonStr := c.Query("season", "1")
+
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Parameter 'id' wajib diisi"})
+	}
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY belum dikonfigurasi"})
+	}
+
+	tmdbURL := "https://api.themoviedb.org/3/tv/" + idStr + "/season/" + seasonStr + "?api_key=" + apiKey
+
+	resp, err := http.Get(tmdbURL)
+	if err != nil || resp.StatusCode != 200 {
+		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil daftar episode dari TMDB"})
+	}
+	defer resp.Body.Close()
+
+	var seasonResp TMDBSeasonResponse
+	if err := json.NewDecoder(resp.Body).Decode(&seasonResp); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Gagal membaca daftar episode dari TMDB"})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    seasonResp.Episodes,
+	})
+}

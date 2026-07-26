@@ -64,6 +64,7 @@ func main() {
 
 	app.Get("/api/search", controllers.SearchMovies)
 	app.Get("/api/detail", controllers.GetMediaDetail)
+	app.Get("/api/tv/season", controllers.GetTVSeasonEpisodes)
 
 	privateGroup := app.Group("/api/user")
 	privateGroup.Use(middlewares.Protected())
