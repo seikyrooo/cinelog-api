@@ -26,8 +26,18 @@ func ConnectDB() {
 
     log.Println("Berhasil terhubung ke database.")
 
-    // Auto Migrate skema tabel
-    err = db.AutoMigrate(&models.User{}, &models.Movie{}, &models.UserList{})
+	// Auto Migrate skema tabel.
+	// Naming domain baru memakai Media/UserMediaEntry, tetapi tetap diarahkan ke tabel legacy
+	// agar controller lama dan data eksisting tetap kompatibel selama fase transisi.
+	err = db.AutoMigrate(
+		&models.User{},
+		&models.Media{},
+		&models.MediaSeason{},
+		&models.MediaEpisode{},
+		&models.UserMediaEntry{},
+		&models.UserTVProgress{},
+		&models.UserFollow{},
+	)
     if err != nil {
         log.Fatal("Gagal migrasi database! \n", err)
     }
