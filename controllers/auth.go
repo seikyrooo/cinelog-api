@@ -19,6 +19,25 @@ type AuthInput struct {
 	Password string `json:"password"`
 }
 
+type ProfileInput struct {
+	Bio       string `json:"bio"`
+	AvatarURL string `json:"avatar_url"`
+	IsPublic  *bool  `json:"is_public"`
+}
+
+func safeUserResponse(user models.User) fiber.Map {
+	return fiber.Map{
+		"id":         user.ID,
+		"username":   user.Username,
+		"email":      user.Email,
+		"bio":        user.Bio,
+		"avatar_url": user.AvatarURL,
+		"is_public":  user.IsPublic,
+		"created_at": user.CreatedAt,
+		"updated_at": user.UpdatedAt,
+	}
+}
+
 // REGISTER USER BARU
 func Register(c *fiber.Ctx) error {
 	var input AuthInput
@@ -39,6 +58,7 @@ func Register(c *fiber.Ctx) error {
 		Username: input.Username,
 		Email:    input.Email,
 		Password: string(hashedPassword),
+		IsPublic: true,
 	}
 
 	// Simpan ke Database
@@ -49,6 +69,7 @@ func Register(c *fiber.Ctx) error {
 	return c.Status(201).JSON(fiber.Map{
 		"message": "User berhasil mendaftar!",
 		"user_id": user.ID,
+		"user":    safeUserResponse(user),
 	})
 }
 
@@ -87,5 +108,56 @@ func Login(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message": "Login berhasil!",
 		"token":   t,
+		"user_id": user.ID,
+		"user":    safeUserResponse(user),
+	})
+}
+
+func GetMe(c *fiber.Ctx) error {
+	userIDVal := c.Locals("user_id")
+	if userIDVal == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, uint(userIDVal.(float64))).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    safeUserResponse(user),
+	})
+}
+
+func PatchMe(c *fiber.Ctx) error {
+	userIDVal := c.Locals("user_id")
+	if userIDVal == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	var input ProfileInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Input JSON tidak valid"})
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, uint(userIDVal.(float64))).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+	}
+
+	user.Bio = input.Bio
+	user.AvatarURL = input.AvatarURL
+	if input.IsPublic != nil {
+		user.IsPublic = *input.IsPublic
+	}
+
+	if err := database.DB.Save(&user).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan profile"})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Profile berhasil diperbarui",
+		"data":    safeUserResponse(user),
 	})
 }

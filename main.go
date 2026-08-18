@@ -62,20 +62,35 @@ func main() {
 	authGroup.Post("/register", controllers.Register)
 	authGroup.Post("/login", controllers.Login)
 
+	meGroup := app.Group("/api/me")
+	meGroup.Use(middlewares.Protected())
+	meGroup.Get("/", controllers.GetMe)
+	meGroup.Patch("/", controllers.PatchMe)
+	meGroup.Get("/library", controllers.GetWatchlist)
+	meGroup.Post("/library", controllers.AddToWatchlist)
+	meGroup.Get("/library/:id", controllers.GetLibraryItem)
+	meGroup.Put("/library/:id", controllers.UpdateWatchlistItem)
+	meGroup.Patch("/library/:id", controllers.UpdateWatchlistItem)
+	meGroup.Delete("/library/:id", controllers.DeleteWatchlistItem)
+	meGroup.Put("/library/:id/progress", controllers.IncrementEpisodeProgress)
+	meGroup.Put("/library/:id/set-progress", controllers.SetEpisodeWatchedProgress)
+	meGroup.Put("/library/:id/tv-progress", controllers.SetTVProgress)
+	meGroup.Patch("/library/:id/tv-progress", controllers.SetTVProgress)
+	meGroup.Get("/library/check/:tmdbId", controllers.CheckLibraryItem)
+	meGroup.Post("/follow/:id", controllers.FollowUser)
+	meGroup.Delete("/follow/:id", controllers.UnfollowUser)
+
 	app.Get("/api/search", controllers.SearchMovies)
 	app.Get("/api/detail", controllers.GetMediaDetail)
 	app.Get("/api/tv/season", controllers.GetTVSeasonEpisodes)
+	app.Get("/api/users/:username", controllers.GetPublicProfile)
+	app.Get("/api/users/:username/favorites", controllers.GetPublicFavorites)
+	app.Get("/api/users/:username/ratings", controllers.GetPublicRatings)
 
 	privateGroup := app.Group("/api/user")
 	privateGroup.Use(middlewares.Protected())
 
-	privateGroup.Get("/profile", func(c *fiber.Ctx) error {
-		userID := c.Locals("user_id")
-		return c.JSON(fiber.Map{
-			"message": "Authenticated profile",
-			"user_id": userID,
-		})
-	})
+	privateGroup.Get("/profile", controllers.GetMe)
 
 	privateGroup.Get("/watchlist", controllers.GetWatchlist)
 	privateGroup.Post("/watchlist", controllers.AddToWatchlist)

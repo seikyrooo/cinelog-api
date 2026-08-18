@@ -7,12 +7,21 @@ Backend REST API untuk platform pelacak film dan serial TV Cinelog, dibangun men
 ## 🗄️ Skema Database
 
 ```text
-users (1) ───< user_lists (M) >─── (1) movies
+users (1) ───< user_lists / user_media_entries (M) >─── (1) movies / media
 ```
 
-- **`users`**: Data akun pengguna (`username`, `email`, `password` hash).
-- **`movies`**: Cache metadata media (`tmdb_id`, `media_type`, `title`, `overview`, `local_poster_path`, `local_backdrop_path`, `director`, `cast`, `total_seasons`, `total_episodes`, `next_air_date`, `media_status`).
-- **`user_lists`**: Personal watchlist (`user_id`, `movie_id`, `status`, `rating` (1.0 - 5.0 bintang), `favorite`, `notes`, `season_watched`, `episodes_watched`, `total_episodes`).
+- **`users`**: Data akun pengguna + profile dasar (`username`, `email`, `password` hash, `bio`, `avatar_url`, `is_public`).
+- **`movies`** *(domain baru: `media`)*: Cache metadata media (`tmdb_id`, `media_type`, `title`, `original_title`, `overview`, `release_date`, `first_air_date`, `local_poster_path`, `local_backdrop_path`, `genres`, `director`, `cast`, `total_seasons`, `total_episodes`, `next_air_date`, `media_status`).
+- **`user_lists`** *(domain baru: `user_media_entries`)*: State personal user terhadap media (`status`, `rating` **0–10**, `favorite`, `notes`, `visibility_rating`, `visibility_favorite`, `started_at`, `completed_at`).
+- **`user_tv_progress`**: Fondasi transisi untuk memisahkan progress TV dari personal entry (`current_season`, `current_episode`, `episodes_watched_count`, `last_watched_at`).
+- **`user_follows`**: Relasi follow/unfollow antar user untuk social-lite.
+
+### Catatan Contract Transisi
+
+- Naming domain produk mengikuti spec baru: **Media** dan **UserMediaEntry**.
+- Untuk menjaga kompatibilitas data dan controller lama, implementasi backend saat ini **masih memetakan domain baru ke tabel legacy** `movies` dan `user_lists`.
+- Endpoint watchlist lama masih aktif selama fase transisi, sambil kontrak baru `/api/me/library` disiapkan bertahap.
+- Rating personal user sudah distandardkan ke skala **0–10**.
 
 ---
 
@@ -33,7 +42,7 @@ users (1) ───< user_lists (M) >─── (1) movies
 - `GET /api/user/profile` - Verifikasi profil user
 - `GET /api/user/watchlist?status=watching&favorite=true&media_type=tv` - Ambil daftar tontonan user
 - `POST /api/user/watchlist` - Tambah item ke watchlist & otomatis download poster ke VPS
-- `PUT /api/user/watchlist/:id` - Update status, rating 1-5, notes, & episode
+- `PUT /api/user/watchlist/:id` - Update status, rating 0-10, notes, visibility, & episode
 - `PUT /api/user/watchlist/:id/progress` - **Inkremen +1 episode** (Gestur TV Time)
 - `PUT /api/user/watchlist/:id/set-progress` - Set spesifik season & episode ditonton
 - `DELETE /api/user/watchlist/:id` - Hapus item dari watchlist
