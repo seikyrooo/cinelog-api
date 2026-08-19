@@ -138,14 +138,23 @@ func Login(c *fiber.Ctx) error {
 	})
 }
 
+// GetContextUserID extracts authenticated user ID from context
+func GetContextUserID(c *fiber.Ctx) (uint, error) {
+	val := c.Locals("user_id")
+	if val == nil {
+		return 0, c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	}
+	return uint(val.(float64)), nil
+}
+
 func GetMe(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
 
 	var user models.User
-	if err := database.DB.First(&user, uint(userIDVal.(float64))).Error; err != nil {
+	if err := database.DB.First(&user, userID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
@@ -156,9 +165,9 @@ func GetMe(c *fiber.Ctx) error {
 }
 
 func PatchMe(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
 
 	var input ProfileInput
@@ -167,7 +176,7 @@ func PatchMe(c *fiber.Ctx) error {
 	}
 
 	var user models.User
-	if err := database.DB.First(&user, uint(userIDVal.(float64))).Error; err != nil {
+	if err := database.DB.First(&user, userID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
@@ -189,11 +198,10 @@ func PatchMe(c *fiber.Ctx) error {
 
 // UploadAvatar handles direct file upload for user avatar
 func UploadAvatar(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	file, err := c.FormFile("avatar")
 	if err != nil {

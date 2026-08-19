@@ -173,11 +173,10 @@ func GetPublicProfile(c *fiber.Ctx) error {
 }
 
 func FollowUser(c *fiber.Ctx) error {
-	followerVal := c.Locals("user_id")
-	if followerVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	followerID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	followerID := uint(followerVal.(float64))
 
 	followingID64, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
@@ -200,11 +199,10 @@ func FollowUser(c *fiber.Ctx) error {
 }
 
 func UnfollowUser(c *fiber.Ctx) error {
-	followerVal := c.Locals("user_id")
-	if followerVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	followerID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	followerID := uint(followerVal.(float64))
 
 	followingID64, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {

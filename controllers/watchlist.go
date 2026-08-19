@@ -138,11 +138,10 @@ func syncTVProgress(userList *models.UserList) {
 
 // AddToWatchlist creates or updates a movie/tv item in DB & user's list
 func AddToWatchlist(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	var input WatchlistInput
 	if err := c.BodyParser(&input); err != nil {
@@ -163,7 +162,7 @@ func AddToWatchlist(c *fiber.Ctx) error {
 
 	// 1. Check if media exists in database
 	var movie models.Movie
-	err := database.DB.Where("tmdb_id = ? AND media_type = ?", input.TMDBID, input.MediaType).First(&movie).Error
+	err = database.DB.Where("tmdb_id = ? AND media_type = ?", input.TMDBID, input.MediaType).First(&movie).Error
 	if err != nil {
 		localPoster, _ := services.DownloadTMDBImage(input.PosterPath, "posters")
 		localBackdrop, _ := services.DownloadTMDBImage(input.BackdropPath, "backdrops")
@@ -308,11 +307,10 @@ func AddToWatchlist(c *fiber.Ctx) error {
 
 // GetWatchlist retrieves user's watchlist with optional filters
 func GetWatchlist(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	statusFilter := c.Query("status")
 	favoriteFilter := c.Query("favorite")
@@ -347,11 +345,10 @@ func GetWatchlist(c *fiber.Ctx) error {
 
 // GetLibraryItem retrieves one private library entry owned by the current user.
 func GetLibraryItem(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -371,11 +368,10 @@ func GetLibraryItem(c *fiber.Ctx) error {
 
 // UpdateWatchlistItem updates status, rating, or notes of an item
 func UpdateWatchlistItem(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -425,11 +421,10 @@ func UpdateWatchlistItem(c *fiber.Ctx) error {
 
 // IncrementEpisodeProgress advances watched episode count by 1 (TV Time gesture action)
 func IncrementEpisodeProgress(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -512,11 +507,10 @@ type SetProgressInput struct {
 
 // SetEpisodeWatchedProgress sets exact episode & season watched count
 func SetEpisodeWatchedProgress(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -591,11 +585,10 @@ func SetTVProgress(c *fiber.Ctx) error {
 
 // DeleteWatchlistItem removes an item from user's list
 func DeleteWatchlistItem(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -615,11 +608,10 @@ func DeleteWatchlistItem(c *fiber.Ctx) error {
 
 // CheckLibraryItem checks if a TMDB item is already in the current user's private library.
 func CheckLibraryItem(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	tmdbID, err := strconv.Atoi(c.Params("tmdbId"))
 	if err != nil {
@@ -654,11 +646,10 @@ func CheckLibraryItem(c *fiber.Ctx) error {
 
 // CheckWatchlistItem checks if a TMDB item is already in user's list
 func CheckWatchlistItem(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	tmdbID, err := strconv.Atoi(c.Params("tmdbId"))
 	if err != nil {
@@ -690,11 +681,10 @@ func CheckWatchlistItem(c *fiber.Ctx) error {
 
 // GetReleaseRadar returns user's watchlist TV shows and movies with upcoming air dates & release status
 func GetReleaseRadar(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	var watchlist []models.UserList
 	if err := database.DB.Preload("Movie").Where("user_id = ? AND status <> ?", userID, "dropped").Find(&watchlist).Error; err != nil {
@@ -717,11 +707,10 @@ func GetReleaseRadar(c *fiber.Ctx) error {
 
 // SyncRadarAirDates queries TMDB to synchronize the latest upcoming air dates and episode titles
 func SyncRadarAirDates(c *fiber.Ctx) error {
-	userIDVal := c.Locals("user_id")
-	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return err
 	}
-	userID := uint(userIDVal.(float64))
 
 	apiKey := os.Getenv("TMDB_API_KEY")
 	if apiKey == "" {
