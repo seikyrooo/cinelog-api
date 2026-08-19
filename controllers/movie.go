@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"cinelog-api/database"
 	"cinelog-api/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -253,6 +254,41 @@ func GetMediaDetail(c *fiber.Ctx) error {
 			seasonsList = append(seasonsList, s)
 		}
 	}
+
+	// Auto-heal/sync movie in local database if it already exists with missing metadata
+	go func(tmdbID int, poster, backdrop, overview, relDate, status string, seasons, episodes int) {
+		var m models.Movie
+		if err := database.DB.Where("tmdb_id = ?", tmdbID).First(&m).Error; err == nil {
+			updated := false
+			if poster != "" && (m.PosterPath == "" || m.PosterPath != poster) {
+				m.PosterPath = poster
+				updated = true
+			}
+			if backdrop != "" && (m.BackdropPath == "" || m.BackdropPath != backdrop) {
+				m.BackdropPath = backdrop
+				updated = true
+			}
+			if overview != "" && m.Overview == "" {
+				m.Overview = overview
+				updated = true
+			}
+			if seasons > 0 && m.TotalSeasons == 0 {
+				m.TotalSeasons = seasons
+				updated = true
+			}
+			if episodes > 0 && m.TotalEpisodes == 0 {
+				m.TotalEpisodes = episodes
+				updated = true
+			}
+			if status != "" && m.MediaStatus == "" {
+				m.MediaStatus = status
+				updated = true
+			}
+			if updated {
+				database.DB.Save(&m)
+			}
+		}
+	}(detail.ID, detail.PosterPath, detail.BackdropPath, detail.Overview, releaseDate, detail.Status, detail.NumberOfSeasons, detail.NumberOfEpisodes)
 
 	return c.JSON(fiber.Map{
 		"success": true,
