@@ -271,6 +271,36 @@ func isValidImage(buf []byte, ext string, reportedMIME string) bool {
 	return false
 }
 
+func getAvatarUploadDir() string {
+	custom := strings.TrimSpace(os.Getenv("UPLOAD_DIR"))
+	if custom != "" {
+		p := filepath.Join(custom, "avatars")
+		if err := os.MkdirAll(p, 0777); err == nil {
+			return p
+		}
+	}
+
+	// 1. Try relative ./uploads/avatars
+	p := "./uploads/avatars"
+	if err := os.MkdirAll(p, 0777); err == nil {
+		return p
+	}
+
+	// 2. Try directory of running executable
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		p = filepath.Join(exeDir, "uploads", "avatars")
+		if err := os.MkdirAll(p, 0777); err == nil {
+			return p
+		}
+	}
+
+	// 3. Fallback to /tmp/uploads/avatars
+	p = "/tmp/uploads/avatars"
+	_ = os.MkdirAll(p, 0777)
+	return p
+}
+
 // UploadAvatar handles direct file upload for user avatar with robust validation
 func UploadAvatar(c *fiber.Ctx) error {
 	userID, err := GetContextUserID(c)
@@ -319,12 +349,9 @@ func UploadAvatar(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid file content: only authentic JPG, PNG, WEBP, and GIF images are permitted"})
 	}
 
-	if err := os.MkdirAll("./uploads/avatars", 0777); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to prepare avatar upload storage directory"})
-	}
-
+	uploadDir := getAvatarUploadDir()
 	filename := fmt.Sprintf("avatar_%d_%d%s", userID, time.Now().UnixNano(), ext)
-	savePath := filepath.Join("./uploads/avatars", filename)
+	savePath := filepath.Join(uploadDir, filename)
 
 	if err := c.SaveFile(file, savePath); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("Failed to save avatar image file: %v", err)})
