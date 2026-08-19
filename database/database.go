@@ -3,10 +3,12 @@ package database
 import (
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"cinelog-api/models"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -15,9 +17,22 @@ import (
 var DB *gorm.DB
 
 func ConnectDB() {
-	dsn := os.Getenv("DB_DSN")
+	dsn := strings.TrimSpace(os.Getenv("DB_DSN"))
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	var dialector gorm.Dialector
+	if dsn == "" || strings.HasSuffix(dsn, ".db") || strings.HasPrefix(dsn, "sqlite:") {
+		dbFile := dsn
+		if dbFile == "" || strings.HasPrefix(dbFile, "sqlite:") {
+			dbFile = "cinelog.db"
+		}
+		dialector = sqlite.Open(dbFile)
+		log.Printf("Connecting to SQLite database: %s", dbFile)
+	} else {
+		dialector = postgres.Open(dsn)
+		log.Println("Connecting to PostgreSQL database...")
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 

@@ -33,3 +33,7 @@ uploads/
 # Editor/IDE
 # .idea/
 # .vscode/
+
+cinelog.db
+*.db
+
