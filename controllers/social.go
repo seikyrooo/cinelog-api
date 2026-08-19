@@ -124,9 +124,9 @@ func SearchUsers(c *fiber.Ctx) error {
 }
 
 func GetPublicProfile(c *fiber.Ctx) error {
-	username := c.Params("username")
-	if username == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Username parameter is required"})
+	username := strings.TrimSpace(c.Params("username"))
+	if username == "" || strings.EqualFold(username, "search") || strings.EqualFold(username, "discover") {
+		return SearchUsers(c)
 	}
 
 	var user models.User
