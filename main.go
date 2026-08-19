@@ -66,6 +66,9 @@ func main() {
 	meGroup.Use(middlewares.Protected())
 	meGroup.Get("/", controllers.GetMe)
 	meGroup.Patch("/", controllers.PatchMe)
+	meGroup.Post("/avatar", controllers.UploadAvatar)
+	meGroup.Get("/radar", controllers.GetReleaseRadar)
+	meGroup.Post("/radar/sync", controllers.SyncRadarAirDates)
 	meGroup.Get("/library", controllers.GetWatchlist)
 	meGroup.Post("/library", controllers.AddToWatchlist)
 	meGroup.Get("/library/:id", controllers.GetLibraryItem)
@@ -93,6 +96,7 @@ func main() {
 	privateGroup.Use(middlewares.Protected())
 
 	privateGroup.Get("/profile", controllers.GetMe)
+	privateGroup.Post("/avatar", controllers.UploadAvatar)
 
 	privateGroup.Get("/watchlist", controllers.GetWatchlist)
 	privateGroup.Post("/watchlist", controllers.AddToWatchlist)

@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -181,6 +183,56 @@ func PatchMe(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"message": "Profile updated successfully",
+		"data":    safeUserResponse(user),
+	})
+}
+
+// UploadAvatar handles direct file upload for user avatar
+func UploadAvatar(c *fiber.Ctx) error {
+	userIDVal := c.Locals("user_id")
+	if userIDVal == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	}
+	userID := uint(userIDVal.(float64))
+
+	file, err := c.FormFile("avatar")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Avatar image file is required"})
+	}
+
+	// 5MB max size
+	if file.Size > 5*1024*1024 {
+		return c.Status(400).JSON(fiber.Map{"error": "Image size exceeds maximum limit of 5MB"})
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" && ext != ".gif" {
+		return c.Status(400).JSON(fiber.Map{"error": "Allowed image formats: JPG, PNG, WEBP, GIF"})
+	}
+
+	_ = os.MkdirAll("./uploads/avatars", 0755)
+	filename := fmt.Sprintf("avatar_%d_%d%s", userID, time.Now().UnixNano(), ext)
+	savePath := filepath.Join("./uploads/avatars", filename)
+
+	if err := c.SaveFile(file, savePath); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to save avatar image file"})
+	}
+
+	avatarURL := "/uploads/avatars/" + filename
+
+	var user models.User
+	if err := database.DB.First(&user, userID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	user.AvatarURL = avatarURL
+	if err := database.DB.Save(&user).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update user avatar"})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Avatar uploaded successfully",
 		"data":    safeUserResponse(user),
 	})
 }

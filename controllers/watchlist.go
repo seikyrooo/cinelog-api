@@ -1,7 +1,10 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -682,5 +685,90 @@ func CheckWatchlistItem(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"in_watchlist": true,
 		"data":         userList,
+	})
+}
+
+// GetReleaseRadar returns user's watchlist TV shows and movies with upcoming air dates & release status
+func GetReleaseRadar(c *fiber.Ctx) error {
+	userIDVal := c.Locals("user_id")
+	if userIDVal == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	}
+	userID := uint(userIDVal.(float64))
+
+	var watchlist []models.UserList
+	if err := database.DB.Preload("Movie").Where("user_id = ? AND status <> ?", userID, "dropped").Find(&watchlist).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to load radar items"})
+	}
+
+	var radarItems []models.UserList
+	for _, item := range watchlist {
+		// Include if it is a TV show (ongoing or returning) or has a known next_air_date
+		if item.Movie.MediaType == "tv" || item.Movie.NextAirDate != "" {
+			radarItems = append(radarItems, item)
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    radarItems,
+	})
+}
+
+// SyncRadarAirDates queries TMDB to synchronize the latest upcoming air dates and episode titles
+func SyncRadarAirDates(c *fiber.Ctx) error {
+	userIDVal := c.Locals("user_id")
+	if userIDVal == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
+	}
+	userID := uint(userIDVal.(float64))
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
+	}
+
+	var watchlist []models.UserList
+	if err := database.DB.Preload("Movie").Where("user_id = ? AND status <> ?", userID, "dropped").Find(&watchlist).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to query watchlist"})
+	}
+
+	var updatedCount int
+	for _, item := range watchlist {
+		if item.Movie.MediaType == "tv" && item.Movie.TMDBID > 0 {
+			tmdbURL := fmt.Sprintf("https://api.themoviedb.org/3/tv/%d?api_key=%s", item.Movie.TMDBID, apiKey)
+			resp, err := tmdbHttpClient.Get(tmdbURL)
+			if err != nil || resp.StatusCode != 200 {
+				if resp != nil {
+					resp.Body.Close()
+				}
+				continue
+			}
+
+			var detail models.TMDBDetail
+			if err := json.NewDecoder(resp.Body).Decode(&detail); err == nil {
+				var nextAirDate string
+				var nextEpsName string
+				if detail.NextEpisodeToAir != nil {
+					nextAirDate = detail.NextEpisodeToAir.AirDate
+					nextEpsName = detail.NextEpisodeToAir.Name
+				}
+
+				database.DB.Model(&models.Movie{}).Where("id = ?", item.Movie.ID).Updates(map[string]interface{}{
+					"next_air_date":     nextAirDate,
+					"next_episode_name": nextEpsName,
+					"total_seasons":     detail.NumberOfSeasons,
+					"total_episodes":    detail.NumberOfEpisodes,
+					"media_status":      detail.Status,
+				})
+				updatedCount++
+			}
+			resp.Body.Close()
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": fmt.Sprintf("Synchronized %d series with TMDB radar", updatedCount),
 	})
 }
