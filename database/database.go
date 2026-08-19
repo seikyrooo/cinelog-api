@@ -51,6 +51,9 @@ func ConnectDB() {
 		log.Fatal("Gagal migrasi database! \n", err)
 	}
 
+	// Backfill any NULL or unset is_public in users table to true
+	_ = db.Exec("UPDATE users SET is_public = true WHERE is_public IS NULL").Error
+
 	log.Println("Database Migration selesai.")
 	DB = db
 }

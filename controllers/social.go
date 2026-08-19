@@ -74,13 +74,13 @@ func SearchUsers(c *fiber.Ctx) error {
 	query := strings.TrimSpace(c.Query("q"))
 	currentUserID := getOptionalUserID(c)
 
-	dbQuery := database.DB.Select("id, username, bio, avatar_url, created_at, is_public").Where("is_public = ?", true)
+	dbQuery := database.DB.Select("id, username, bio, avatar_url, created_at, is_public").Where("is_public = ? OR is_public IS NULL", true)
 	if query != "" {
 		dbQuery = dbQuery.Where("LOWER(username) LIKE ? OR LOWER(bio) LIKE ?", "%"+strings.ToLower(query)+"%", "%"+strings.ToLower(query)+"%")
 	}
 
 	var users []models.User
-	if err := dbQuery.Order("created_at desc").Limit(40).Find(&users).Error; err != nil {
+	if err := dbQuery.Order("created_at desc").Limit(60).Find(&users).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to search users"})
 	}
 
@@ -130,7 +130,7 @@ func GetPublicProfile(c *fiber.Ctx) error {
 	}
 
 	var user models.User
-	if err := database.DB.Select("id, username, bio, avatar_url, is_public, created_at").Where("username = ?", username).First(&user).Error; err != nil {
+	if err := database.DB.Select("id, username, bio, avatar_url, is_public, created_at").Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
@@ -179,24 +179,30 @@ func FollowUser(c *fiber.Ctx) error {
 		return err
 	}
 
-	followingID64, err := strconv.ParseUint(c.Params("id"), 10, 64)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
-	}
-	followingID := uint(followingID64)
-	if followerID == followingID {
-		return c.Status(400).JSON(fiber.Map{"error": "You cannot follow yourself"})
+	targetParam := strings.TrimSpace(c.Params("id"))
+	if targetParam == "" {
+		targetParam = strings.TrimSpace(c.Params("username"))
 	}
 
 	var target models.User
-	if err := database.DB.First(&target, followingID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
+	if targetID64, parseErr := strconv.ParseUint(targetParam, 10, 64); parseErr == nil {
+		if err := database.DB.First(&target, uint(targetID64)).Error; err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
+		}
+	} else {
+		if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(targetParam)).First(&target).Error; err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
+		}
 	}
 
-	follow := models.UserFollow{FollowerUserID: followerID, FollowingUserID: followingID}
-	database.DB.Where(follow).FirstOrCreate(&follow)
+	if followerID == target.ID {
+		return c.Status(400).JSON(fiber.Map{"error": "You cannot follow yourself"})
+	}
 
-	return c.JSON(fiber.Map{"message": "User followed successfully", "data": follow})
+	follow := models.UserFollow{FollowerUserID: followerID, FollowingUserID: target.ID}
+	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, target.ID).FirstOrCreate(&follow)
+
+	return c.JSON(fiber.Map{"success": true, "message": "User followed successfully", "data": follow})
 }
 
 func UnfollowUser(c *fiber.Ctx) error {
@@ -205,13 +211,24 @@ func UnfollowUser(c *fiber.Ctx) error {
 		return err
 	}
 
-	followingID64, err := strconv.ParseUint(c.Params("id"), 10, 64)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	targetParam := strings.TrimSpace(c.Params("id"))
+	if targetParam == "" {
+		targetParam = strings.TrimSpace(c.Params("username"))
 	}
 
-	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, uint(followingID64)).Delete(&models.UserFollow{})
-	return c.JSON(fiber.Map{"message": "User unfollowed successfully"})
+	var targetID uint
+	if targetID64, parseErr := strconv.ParseUint(targetParam, 10, 64); parseErr == nil {
+		targetID = uint(targetID64)
+	} else {
+		var target models.User
+		if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(targetParam)).First(&target).Error; err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
+		}
+		targetID = target.ID
+	}
+
+	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, targetID).Delete(&models.UserFollow{})
+	return c.JSON(fiber.Map{"success": true, "message": "User unfollowed successfully"})
 }
 
 func GetUserFollowers(c *fiber.Ctx) error {

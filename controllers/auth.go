@@ -198,7 +198,7 @@ func PatchMe(c *fiber.Ctx) error {
 
 	cleanAvatarURL := strings.TrimSpace(input.AvatarURL)
 	if cleanAvatarURL != "" {
-		if !strings.HasPrefix(cleanAvatarURL, "http://") && !strings.HasPrefix(cleanAvatarURL, "https://") && !strings.HasPrefix(cleanAvatarURL, "/uploads/") && !strings.HasPrefix(cleanAvatarURL, "uploads/") {
+		if !strings.HasPrefix(cleanAvatarURL, "http://") && !strings.HasPrefix(cleanAvatarURL, "https://") && !strings.HasPrefix(cleanAvatarURL, "/uploads/") && !strings.HasPrefix(cleanAvatarURL, "uploads/") && !strings.HasPrefix(cleanAvatarURL, "/api/uploads/") {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid avatar URL format"})
 		}
 		if len(cleanAvatarURL) > 500 {
@@ -223,20 +223,20 @@ func PatchMe(c *fiber.Ctx) error {
 
 // isValidImage validates genuine image files by magic bytes, standard library detection, and MIME check
 func isValidImage(buf []byte, ext string, reportedMIME string) bool {
-	if len(buf) < 4 {
+	if len(buf) < 2 {
 		return false
 	}
 
 	// Reject dangerous executable and script signatures
 	s := strings.ToLower(string(buf))
 	if strings.HasPrefix(s, "<?php") || strings.HasPrefix(s, "<script") || strings.HasPrefix(s, "<html>") ||
-		strings.HasPrefix(s, "<!doctype") || strings.HasPrefix(s, "<svg") || strings.HasPrefix(s, "<?xml") ||
+		strings.HasPrefix(s, "<!doctype") || strings.HasPrefix(s, "<?xml") ||
 		strings.HasPrefix(s, "\x7felf") || (len(buf) >= 2 && buf[0] == 'M' && buf[1] == 'Z') {
 		return false
 	}
 
-	// 1. JPEG signature: 0xFF 0xD8 0xFF
-	if len(buf) >= 3 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF {
+	// 1. JPEG signature: 0xFF 0xD8
+	if len(buf) >= 2 && buf[0] == 0xFF && buf[1] == 0xD8 {
 		return true
 	}
 
@@ -256,14 +256,15 @@ func isValidImage(buf []byte, ext string, reportedMIME string) bool {
 	}
 
 	// 5. Standard library MIME sniffing
-	detectedMIME := http.DetectContentType(buf)
-	if detectedMIME == "image/jpeg" || detectedMIME == "image/png" || detectedMIME == "image/webp" || detectedMIME == "image/gif" {
+	detectedMIME := strings.ToLower(http.DetectContentType(buf))
+	if strings.HasPrefix(detectedMIME, "image/") {
 		return true
 	}
 
 	// 6. Browser reported image header with matching allowed extension
+	reportedMIME = strings.ToLower(reportedMIME)
 	if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif") &&
-		strings.HasPrefix(reportedMIME, "image/") {
+		(strings.HasPrefix(reportedMIME, "image/") || reportedMIME == "application/octet-stream") {
 		return true
 	}
 
@@ -278,6 +279,12 @@ func UploadAvatar(c *fiber.Ctx) error {
 	}
 
 	file, err := c.FormFile("avatar")
+	if err != nil {
+		file, err = c.FormFile("file")
+	}
+	if err != nil {
+		file, err = c.FormFile("image")
+	}
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Avatar image file is required"})
 	}
