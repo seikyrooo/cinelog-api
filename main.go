@@ -10,6 +10,7 @@ import (
 	"cinelog-api/middlewares"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -44,6 +45,11 @@ func main() {
 		AllowMethods: "GET, POST, HEAD, PUT, DELETE, PATCH, OPTIONS",
 	}))
 
+	// Response Compression (Gzip / Deflate / Brotli)
+	app.Use(compress.New(compress.Config{
+		Level: compress.LevelBestSpeed,
+	}))
+
 	app.Use(logger.New())
 
 	// General API rate limiter
@@ -73,9 +79,14 @@ func main() {
 	_ = os.MkdirAll("./uploads/backdrops", 0755)
 	_ = os.MkdirAll("./uploads/avatars", 0755)
 
-	// Serve Static Uploaded Images (Posters & Backdrops) locally from VPS
-	app.Static("/uploads", "./uploads")
-	app.Static("/api/uploads", "./uploads")
+	// Serve Static Uploaded Images with HTTP 1-year Cache Headers & Compression
+	staticConfig := fiber.Static{
+		Compress:  true,
+		ByteRange: true,
+		MaxAge:    31536000, // 1 year browser cache
+	}
+	app.Static("/uploads", "./uploads", staticConfig)
+	app.Static("/api/uploads", "./uploads", staticConfig)
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{

@@ -74,7 +74,7 @@ func SearchUsers(c *fiber.Ctx) error {
 	query := strings.TrimSpace(c.Query("q"))
 	currentUserID := getOptionalUserID(c)
 
-	dbQuery := database.DB.Where("is_public = ?", true)
+	dbQuery := database.DB.Select("id, username, bio, avatar_url, created_at, is_public").Where("is_public = ?", true)
 	if query != "" {
 		dbQuery = dbQuery.Where("LOWER(username) LIKE ? OR LOWER(bio) LIKE ?", "%"+strings.ToLower(query)+"%", "%"+strings.ToLower(query)+"%")
 	}
@@ -130,7 +130,7 @@ func GetPublicProfile(c *fiber.Ctx) error {
 	}
 
 	var user models.User
-	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := database.DB.Select("id, username, bio, avatar_url, is_public, created_at").Where("username = ?", username).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 	if !user.IsPublic {

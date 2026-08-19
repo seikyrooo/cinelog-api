@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"cinelog-api/database"
@@ -16,6 +18,35 @@ import (
 
 var tmdbHttpClient = &http.Client{
 	Timeout: 10 * time.Second,
+}
+
+type cacheEntry struct {
+	data      interface{}
+	expiresAt time.Time
+}
+
+var (
+	cacheMu   sync.RWMutex
+	tmdbCache = make(map[string]cacheEntry)
+)
+
+func getFromCache(key string) (interface{}, bool) {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	entry, exists := tmdbCache[key]
+	if !exists || time.Now().After(entry.expiresAt) {
+		return nil, false
+	}
+	return entry.data, true
+}
+
+func saveToCache(key string, data interface{}, ttl time.Duration) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	tmdbCache[key] = cacheEntry{
+		data:      data,
+		expiresAt: time.Now().Add(ttl),
+	}
 }
 
 func sanitizeTMDBResults(results []models.TMDBMedia, defaultType string) []models.TMDBMedia {
@@ -46,15 +77,10 @@ func sanitizeTMDBResults(results []models.TMDBMedia, defaultType string) []model
 	return filtered
 }
 
-// GetTrending returns trending movies/TV shows from TMDB
+// GetTrending returns trending movies/TV shows from TMDB with in-memory caching
 func GetTrending(c *fiber.Ctx) error {
 	mediaType := c.Query("type", "all")
 	timeWindow := c.Query("time", "week")
-
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
 
 	if timeWindow != "day" && timeWindow != "week" {
 		timeWindow = "week"
@@ -63,6 +89,20 @@ func GetTrending(c *fiber.Ctx) error {
 	validType := "all"
 	if mediaType == "movie" || mediaType == "tv" {
 		validType = mediaType
+	}
+
+	cacheKey := fmt.Sprintf("trending:%s:%s", validType, timeWindow)
+	if cached, ok := getFromCache(cacheKey); ok {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    cached,
+			"cached":  true,
+		})
+	}
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
 	}
 
 	tmdbURL := "https://api.themoviedb.org/3/trending/" + validType + "/" + timeWindow + "?api_key=" + apiKey
@@ -79,6 +119,7 @@ func GetTrending(c *fiber.Ctx) error {
 	}
 
 	filteredResults := sanitizeTMDBResults(tmdbResp.Results, mediaType)
+	saveToCache(cacheKey, filteredResults, 10*time.Minute)
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -86,19 +127,28 @@ func GetTrending(c *fiber.Ctx) error {
 	})
 }
 
-// GetDiscover returns top popular or highest rated content
+// GetDiscover returns top popular or highest rated content with in-memory caching
 func GetDiscover(c *fiber.Ctx) error {
 	mediaType := c.Query("type", "movie")
 	sortBy := c.Query("sort", "popularity.desc")
 
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
-
 	endpoint := "movie"
 	if mediaType == "tv" {
 		endpoint = "tv"
+	}
+
+	cacheKey := fmt.Sprintf("discover:%s:%s", endpoint, sortBy)
+	if cached, ok := getFromCache(cacheKey); ok {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    cached,
+			"cached":  true,
+		})
+	}
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
 	}
 
 	tmdbURL := "https://api.themoviedb.org/3/discover/" + endpoint + "?sort_by=" + sortBy + "&vote_count.gte=100&api_key=" + apiKey
@@ -115,6 +165,7 @@ func GetDiscover(c *fiber.Ctx) error {
 	}
 
 	filteredResults := sanitizeTMDBResults(tmdbResp.Results, endpoint)
+	saveToCache(cacheKey, filteredResults, 10*time.Minute)
 
 	return c.JSON(fiber.Map{
 		"success": true,

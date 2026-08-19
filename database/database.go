@@ -3,6 +3,7 @@ package database
 import (
 	"log"
 	"os"
+	"time"
 
 	"cinelog-api/models"
 
@@ -25,6 +26,14 @@ func ConnectDB() {
 	}
 
 	log.Println("Berhasil terhubung ke database.")
+
+	// Configure connection pooling for high throughput and connection reuse
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxIdleConns(20)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(1 * time.Hour)
+		sqlDB.SetConnMaxIdleTime(15 * time.Minute)
+	}
 
 	// Auto Migrate skema tabel.
 	// Domain model baru (Media, UserMediaEntry) tetap diarahkan ke tabel legacy
