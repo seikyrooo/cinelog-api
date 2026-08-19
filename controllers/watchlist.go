@@ -438,14 +438,61 @@ func IncrementEpisodeProgress(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "Watchlist item not found"})
 	}
 
-	userList.EpisodesWatched += 1
-	if userList.TotalEpisodes > 0 && userList.EpisodesWatched >= userList.TotalEpisodes {
-		userList.Status = "completed"
-	} else if userList.Status != "watching" {
-		userList.Status = "watching"
+	// 1. Determine total episodes
+	totalEps := userList.TotalEpisodes
+	if totalEps <= 0 && userList.Movie.TotalEpisodes > 0 {
+		totalEps = userList.Movie.TotalEpisodes
+		userList.TotalEpisodes = totalEps
 	}
-	updateProgressMetadata(&userList)
 
+	totalSeasons := userList.Movie.TotalSeasons
+	if totalSeasons <= 0 {
+		totalSeasons = 1
+	}
+
+	// 2. Strict Validation: If already completed or reached max total episodes, do not allow further increments!
+	if userList.Status == "completed" || (totalEps > 0 && userList.EpisodesWatched >= totalEps) {
+		if totalEps > 0 {
+			userList.EpisodesWatched = totalEps
+		}
+		userList.Status = "completed"
+		userList.SeasonWatched = totalSeasons
+		database.DB.Save(&userList)
+		syncTVProgress(&userList)
+
+		return c.JSON(fiber.Map{
+			"message": "Series already completed! All episodes watched.",
+			"data":    userList,
+		})
+	}
+
+	// 3. Increment episode
+	userList.EpisodesWatched += 1
+
+	// 4. Check if this increment completed the entire series
+	if totalEps > 0 && userList.EpisodesWatched >= totalEps {
+		userList.EpisodesWatched = totalEps
+		userList.Status = "completed"
+		userList.SeasonWatched = totalSeasons
+	} else {
+		userList.Status = "watching"
+		// Dynamically advance season if multiple seasons exist
+		if totalSeasons > 1 && totalEps > 0 {
+			avgPerSeason := totalEps / totalSeasons
+			if avgPerSeason <= 0 {
+				avgPerSeason = 1
+			}
+			newSeason := (userList.EpisodesWatched / avgPerSeason) + 1
+			if newSeason > totalSeasons {
+				newSeason = totalSeasons
+			}
+			if newSeason > userList.SeasonWatched {
+				userList.SeasonWatched = newSeason
+			}
+		}
+	}
+
+	updateProgressMetadata(&userList)
 	database.DB.Save(&userList)
 	syncTVProgress(&userList)
 
@@ -485,21 +532,44 @@ func SetEpisodeWatchedProgress(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "Watchlist item not found"})
 	}
 
+	totalEps := userList.TotalEpisodes
+	if totalEps <= 0 && userList.Movie.TotalEpisodes > 0 {
+		totalEps = userList.Movie.TotalEpisodes
+		userList.TotalEpisodes = totalEps
+	}
+
+	totalSeasons := userList.Movie.TotalSeasons
+	if totalSeasons <= 0 {
+		totalSeasons = 1
+	}
+
 	if input.SeasonWatched > 0 {
 		userList.SeasonWatched = input.SeasonWatched
 	}
 	if input.CurrentSeason > 0 {
 		userList.SeasonWatched = input.CurrentSeason
 	}
+
+	var epsTarget int
 	if input.CurrentEpisode > 0 {
-		userList.EpisodesWatched = input.CurrentEpisode
+		epsTarget = input.CurrentEpisode
 	} else {
-		userList.EpisodesWatched = input.EpisodesWatched
+		epsTarget = input.EpisodesWatched
 	}
 
-	if userList.TotalEpisodes > 0 && userList.EpisodesWatched >= userList.TotalEpisodes {
+	// Cap at maximum total episodes if known
+	if totalEps > 0 && epsTarget > totalEps {
+		epsTarget = totalEps
+	}
+	if epsTarget < 0 {
+		epsTarget = 0
+	}
+	userList.EpisodesWatched = epsTarget
+
+	if totalEps > 0 && userList.EpisodesWatched >= totalEps {
 		userList.Status = "completed"
-	} else if userList.EpisodesWatched > 0 && userList.Status == "plan_to_watch" {
+		userList.SeasonWatched = totalSeasons
+	} else if userList.EpisodesWatched > 0 {
 		userList.Status = "watching"
 	}
 	updateProgressMetadata(&userList)
