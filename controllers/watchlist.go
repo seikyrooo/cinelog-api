@@ -193,6 +193,30 @@ func AddToWatchlist(c *fiber.Ctx) error {
 			return c.Status(500).JSON(fiber.Map{"error": "Failed to save media metadata to database"})
 		}
 	} else {
+		if input.PosterPath != "" && (movie.PosterPath == "" || movie.PosterPath != input.PosterPath) {
+			movie.PosterPath = input.PosterPath
+			if localPoster, err := services.DownloadTMDBImage(input.PosterPath, "posters"); err == nil && localPoster != "" {
+				movie.LocalPosterPath = localPoster
+			}
+		}
+		if input.BackdropPath != "" && (movie.BackdropPath == "" || movie.BackdropPath != input.BackdropPath) {
+			movie.BackdropPath = input.BackdropPath
+			if localBackdrop, err := services.DownloadTMDBImage(input.BackdropPath, "backdrops"); err == nil && localBackdrop != "" {
+				movie.LocalBackdropPath = localBackdrop
+			}
+		}
+		if input.Title != "" {
+			movie.Title = input.Title
+		}
+		if input.Overview != "" && movie.Overview == "" {
+			movie.Overview = input.Overview
+		}
+		if input.ReleaseDate != "" && movie.ReleaseDate == "" {
+			movie.ReleaseDate = input.ReleaseDate
+		}
+		if input.VoteAverage > 0 {
+			movie.VoteAverage = input.VoteAverage
+		}
 		if input.OriginalTitle != "" {
 			movie.OriginalTitle = input.OriginalTitle
 		}
@@ -220,6 +244,9 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		if input.NextAirDate != "" {
 			movie.NextAirDate = input.NextAirDate
 			movie.NextEpisodeName = input.NextEpisodeName
+		}
+		if input.MediaStatus != "" {
+			movie.MediaStatus = input.MediaStatus
 		}
 		database.DB.Save(&movie)
 	}
