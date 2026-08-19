@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 )
 
 func getOptionalUserID(c *fiber.Ctx) uint {
@@ -69,6 +71,64 @@ func publicLibraryEntry(entry models.UserList) fiber.Map {
 	return data
 }
 
+// findUserByIdentifier locates a user by ID or Username (handling URL-encoding, spaces, plus signs, and case-insensitivity)
+func findUserByIdentifier(identifier string) (*models.User, error) {
+	raw := strings.TrimSpace(identifier)
+	if raw == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	decoded, err := url.PathUnescape(raw)
+	if err != nil || decoded == "" {
+		decoded, _ = url.QueryUnescape(raw)
+	}
+	if decoded == "" {
+		decoded = raw
+	}
+	queryDecoded, _ := url.QueryUnescape(raw)
+	if queryDecoded == "" {
+		queryDecoded = decoded
+	}
+
+	var user models.User
+	db := database.DB.Select("id, username, bio, avatar_url, is_public, created_at")
+
+	// 1. Try numeric ID if identifier parses as integer
+	if uid, err := strconv.ParseUint(decoded, 10, 64); err == nil && uid > 0 {
+		if err := db.Where("id = ?", uint(uid)).First(&user).Error; err == nil {
+			return &user, nil
+		}
+	}
+
+	// 2. Try match username case-insensitively across decoded, raw, and space-replaced variants
+	candidateMap := make(map[string]struct{})
+	for _, cand := range []string{
+		decoded,
+		queryDecoded,
+		raw,
+		strings.ReplaceAll(raw, "+", " "),
+		strings.ReplaceAll(raw, "%20", " "),
+		strings.TrimSpace(decoded),
+		strings.TrimSpace(queryDecoded),
+	} {
+		trimmed := strings.ToLower(strings.TrimSpace(cand))
+		if trimmed != "" {
+			candidateMap[trimmed] = struct{}{}
+		}
+	}
+
+	candidates := make([]string, 0, len(candidateMap))
+	for c := range candidateMap {
+		candidates = append(candidates, c)
+	}
+
+	if err := db.Where("LOWER(username) IN (?)", candidates).First(&user).Error; err == nil {
+		return &user, nil
+	}
+
+	return nil, gorm.ErrRecordNotFound
+}
+
 // SearchUsers discovers and searches community users
 func SearchUsers(c *fiber.Ctx) error {
 	query := strings.TrimSpace(c.Query("q"))
@@ -124,13 +184,13 @@ func SearchUsers(c *fiber.Ctx) error {
 }
 
 func GetPublicProfile(c *fiber.Ctx) error {
-	username := strings.TrimSpace(c.Params("username"))
-	if username == "" || strings.EqualFold(username, "search") || strings.EqualFold(username, "discover") {
+	rawParam := strings.TrimSpace(c.Params("username"))
+	if rawParam == "" || strings.EqualFold(rawParam, "search") || strings.EqualFold(rawParam, "discover") {
 		return SearchUsers(c)
 	}
 
-	var user models.User
-	if err := database.DB.Select("id, username, bio, avatar_url, is_public, created_at").Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
+	user, err := findUserByIdentifier(rawParam)
+	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
@@ -162,7 +222,7 @@ func GetPublicProfile(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"user":            publicUserResponse(user),
+			"user":            publicUserResponse(*user),
 			"favorite_count":  favoriteCount,
 			"rating_count":    ratingCount,
 			"followers_count": followersCount,
@@ -184,15 +244,9 @@ func FollowUser(c *fiber.Ctx) error {
 		targetParam = strings.TrimSpace(c.Params("username"))
 	}
 
-	var target models.User
-	if targetID64, parseErr := strconv.ParseUint(targetParam, 10, 64); parseErr == nil {
-		if err := database.DB.First(&target, uint(targetID64)).Error; err != nil {
-			return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
-		}
-	} else {
-		if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(targetParam)).First(&target).Error; err != nil {
-			return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
-		}
+	target, err := findUserByIdentifier(targetParam)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
 	}
 
 	if followerID == target.ID {
@@ -200,7 +254,7 @@ func FollowUser(c *fiber.Ctx) error {
 	}
 
 	follow := models.UserFollow{FollowerUserID: followerID, FollowingUserID: target.ID}
-	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, target.ID).FirstOrCreate(&follow)
+	database.DB.Where(follow).FirstOrCreate(&follow)
 
 	return c.JSON(fiber.Map{"success": true, "message": "User followed successfully", "data": follow})
 }
@@ -216,25 +270,19 @@ func UnfollowUser(c *fiber.Ctx) error {
 		targetParam = strings.TrimSpace(c.Params("username"))
 	}
 
-	var targetID uint
-	if targetID64, parseErr := strconv.ParseUint(targetParam, 10, 64); parseErr == nil {
-		targetID = uint(targetID64)
-	} else {
-		var target models.User
-		if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(targetParam)).First(&target).Error; err != nil {
-			return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
-		}
-		targetID = target.ID
+	target, err := findUserByIdentifier(targetParam)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
 	}
 
-	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, targetID).Delete(&models.UserFollow{})
+	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, target.ID).Delete(&models.UserFollow{})
 	return c.JSON(fiber.Map{"success": true, "message": "User unfollowed successfully"})
 }
 
 func GetUserFollowers(c *fiber.Ctx) error {
-	username := strings.TrimSpace(c.Params("username"))
-	var user models.User
-	if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
+	rawParam := strings.TrimSpace(c.Params("username"))
+	user, err := findUserByIdentifier(rawParam)
+	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
 
@@ -270,9 +318,9 @@ func GetUserFollowers(c *fiber.Ctx) error {
 }
 
 func GetUserFollowing(c *fiber.Ctx) error {
-	username := strings.TrimSpace(c.Params("username"))
-	var user models.User
-	if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
+	rawParam := strings.TrimSpace(c.Params("username"))
+	user, err := findUserByIdentifier(rawParam)
+	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
 
@@ -316,11 +364,12 @@ func GetPublicRatings(c *fiber.Ctx) error {
 }
 
 func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
-	username := strings.TrimSpace(c.Params("username"))
-	var user models.User
-	if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
+	rawParam := strings.TrimSpace(c.Params("username"))
+	user, err := findUserByIdentifier(rawParam)
+	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
+
 	currentUserID := getOptionalUserID(c)
 	if !user.IsPublic && (currentUserID == 0 || currentUserID != user.ID) {
 		return c.Status(403).JSON(fiber.Map{"error": "This user profile is private"})
