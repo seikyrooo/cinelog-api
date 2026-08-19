@@ -137,17 +137,17 @@ func syncTVProgress(userList *models.UserList) {
 func AddToWatchlist(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	var input WatchlistInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Input JSON tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON payload"})
 	}
 
 	if input.TMDBID == 0 || input.Title == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "TMDB ID dan Judul wajib diisi"})
+		return c.Status(400).JSON(fiber.Map{"error": "TMDB ID and Title are required"})
 	}
 
 	if input.MediaType == "" {
@@ -158,11 +158,10 @@ func AddToWatchlist(c *fiber.Ctx) error {
 	input.VisibilityRating = normalizeVisibility(input.VisibilityRating)
 	input.VisibilityFavorite = normalizeVisibility(input.VisibilityFavorite)
 
-	// 1. Cek apakah Media (Movie/TV) sudah ada di DB
+	// 1. Check if media exists in database
 	var movie models.Movie
 	err := database.DB.Where("tmdb_id = ? AND media_type = ?", input.TMDBID, input.MediaType).First(&movie).Error
 	if err != nil {
-		// Belum ada di DB -> Download poster & backdrop ke local storage VPS
 		localPoster, _ := services.DownloadTMDBImage(input.PosterPath, "posters")
 		localBackdrop, _ := services.DownloadTMDBImage(input.BackdropPath, "backdrops")
 
@@ -191,10 +190,9 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		}
 
 		if err := database.DB.Create(&movie).Error; err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan metadata media ke database"})
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to save media metadata to database"})
 		}
 	} else {
-		// Update detail metadata if available
 		if input.OriginalTitle != "" {
 			movie.OriginalTitle = input.OriginalTitle
 		}
@@ -226,7 +224,7 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		database.DB.Save(&movie)
 	}
 
-	// 2. Upsert ke UserList
+	// 2. Upsert UserList entry
 	var userList models.UserList
 	err = database.DB.Where("user_id = ? AND movie_id = ?", userID, movie.ID).First(&userList).Error
 
@@ -251,7 +249,7 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		}
 		updateProgressMetadata(&userList)
 		if err := database.DB.Create(&userList).Error; err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Gagal menambahkan ke watchlist"})
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to add item to watchlist"})
 		}
 	} else {
 		userList.Status = input.Status
@@ -273,7 +271,7 @@ func AddToWatchlist(c *fiber.Ctx) error {
 	syncTVProgress(&userList)
 
 	return c.Status(200).JSON(fiber.Map{
-		"message": "Berhasil menyimpan ke watchlist",
+		"message": "Saved to watchlist successfully",
 		"data":    userList,
 	})
 }
@@ -308,7 +306,7 @@ func GetWatchlist(c *fiber.Ctx) error {
 
 	var list []models.UserList
 	if err := query.Order("user_lists.updated_at desc").Find(&list).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengambil watchlist"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch watchlist"})
 	}
 
 	return c.JSON(fiber.Map{
@@ -321,18 +319,18 @@ func GetWatchlist(c *fiber.Ctx) error {
 func GetLibraryItem(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid item ID"})
 	}
 
 	var userList models.UserList
 	if err := database.DB.Preload("Movie").Where("id = ? AND user_id = ?", id, userID).First(&userList).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Item library tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "Library item not found"})
 	}
 
 	return c.JSON(fiber.Map{
@@ -345,23 +343,23 @@ func GetLibraryItem(c *fiber.Ctx) error {
 func UpdateWatchlistItem(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid item ID"})
 	}
 
 	var userList models.UserList
 	if err := database.DB.Where("id = ? AND user_id = ?", id, userID).First(&userList).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Item watchlist tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "Watchlist item not found"})
 	}
 
 	var input WatchlistInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Input JSON tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON input"})
 	}
 
 	if input.Status != "" {
@@ -390,7 +388,7 @@ func UpdateWatchlistItem(c *fiber.Ctx) error {
 	syncTVProgress(&userList)
 
 	return c.JSON(fiber.Map{
-		"message": "Watchlist berhasil diperbarui",
+		"message": "Watchlist updated successfully",
 		"data":    userList,
 	})
 }
@@ -399,18 +397,18 @@ func UpdateWatchlistItem(c *fiber.Ctx) error {
 func IncrementEpisodeProgress(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid item ID"})
 	}
 
 	var userList models.UserList
 	if err := database.DB.Preload("Movie").Where("id = ? AND user_id = ?", id, userID).First(&userList).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Item watchlist tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "Watchlist item not found"})
 	}
 
 	userList.EpisodesWatched += 1
@@ -425,7 +423,7 @@ func IncrementEpisodeProgress(c *fiber.Ctx) error {
 	syncTVProgress(&userList)
 
 	return c.JSON(fiber.Map{
-		"message": "Episode berhasil di-update",
+		"message": "Episode progress updated successfully",
 		"data":    userList,
 	})
 }
@@ -441,23 +439,23 @@ type SetProgressInput struct {
 func SetEpisodeWatchedProgress(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid item ID"})
 	}
 
 	var input SetProgressInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Input JSON tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON input"})
 	}
 
 	var userList models.UserList
 	if err := database.DB.Preload("Movie").Where("id = ? AND user_id = ?", id, userID).First(&userList).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Item watchlist tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "Watchlist item not found"})
 	}
 
 	if input.SeasonWatched > 0 {
@@ -483,7 +481,7 @@ func SetEpisodeWatchedProgress(c *fiber.Ctx) error {
 	syncTVProgress(&userList)
 
 	return c.JSON(fiber.Map{
-		"message": "Progres episode berhasil diperbarui",
+		"message": "Progress updated successfully",
 		"data":    userList,
 	})
 }
@@ -497,23 +495,23 @@ func SetTVProgress(c *fiber.Ctx) error {
 func DeleteWatchlistItem(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid item ID"})
 	}
 
 	database.DB.Where("user_media_entry_id = ?", id).Delete(&models.UserTVProgress{})
 	result := database.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&models.UserList{})
 	if result.RowsAffected == 0 {
-		return c.Status(404).JSON(fiber.Map{"error": "Item watchlist tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "Watchlist item not found"})
 	}
 
 	return c.JSON(fiber.Map{
-		"message": "Item berhasil dihapus dari watchlist",
+		"message": "Item deleted from watchlist successfully",
 	})
 }
 
@@ -521,13 +519,13 @@ func DeleteWatchlistItem(c *fiber.Ctx) error {
 func CheckLibraryItem(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	tmdbID, err := strconv.Atoi(c.Params("tmdbId"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "TMDB ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid TMDB ID"})
 	}
 	mediaType := c.Query("type", "movie")
 
@@ -537,7 +535,7 @@ func CheckLibraryItem(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"in_library": false, "in_watchlist": false})
 	}
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengecek metadata media"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to check media metadata"})
 	}
 
 	var userList models.UserList
@@ -546,7 +544,7 @@ func CheckLibraryItem(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"in_library": false, "in_watchlist": false})
 	}
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengecek library"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to check library entry"})
 	}
 
 	return c.JSON(fiber.Map{
@@ -560,13 +558,13 @@ func CheckLibraryItem(c *fiber.Ctx) error {
 func CheckWatchlistItem(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	userID := uint(userIDVal.(float64))
 
 	tmdbID, err := strconv.Atoi(c.Params("tmdbId"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "TMDB ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid TMDB ID"})
 	}
 	mediaType := c.Query("type", "movie")
 

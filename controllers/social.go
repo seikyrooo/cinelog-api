@@ -42,15 +42,15 @@ func publicLibraryEntry(entry models.UserList) fiber.Map {
 func GetPublicProfile(c *fiber.Ctx) error {
 	username := c.Params("username")
 	if username == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Username wajib diisi"})
+		return c.Status(400).JSON(fiber.Map{"error": "Username parameter is required"})
 	}
 
 	var user models.User
 	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 	if !user.IsPublic {
-		return c.Status(403).JSON(fiber.Map{"error": "Profile user private"})
+		return c.Status(403).JSON(fiber.Map{"error": "This user profile is private"})
 	}
 
 	var favoriteCount int64
@@ -72,44 +72,44 @@ func GetPublicProfile(c *fiber.Ctx) error {
 func FollowUser(c *fiber.Ctx) error {
 	followerVal := c.Locals("user_id")
 	if followerVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	followerID := uint(followerVal.(float64))
 
 	followingID64, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "User ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
 	}
 	followingID := uint(followingID64)
 	if followerID == followingID {
-		return c.Status(400).JSON(fiber.Map{"error": "Tidak bisa follow diri sendiri"})
+		return c.Status(400).JSON(fiber.Map{"error": "You cannot follow yourself"})
 	}
 
 	var target models.User
 	if err := database.DB.First(&target, followingID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "User tujuan tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "Target user not found"})
 	}
 
 	follow := models.UserFollow{FollowerUserID: followerID, FollowingUserID: followingID}
 	database.DB.Where(follow).FirstOrCreate(&follow)
 
-	return c.JSON(fiber.Map{"message": "Berhasil follow user", "data": follow})
+	return c.JSON(fiber.Map{"message": "User followed successfully", "data": follow})
 }
 
 func UnfollowUser(c *fiber.Ctx) error {
 	followerVal := c.Locals("user_id")
 	if followerVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 	followerID := uint(followerVal.(float64))
 
 	followingID64, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "User ID tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
 	}
 
 	database.DB.Where("follower_user_id = ? AND following_user_id = ?", followerID, uint(followingID64)).Delete(&models.UserFollow{})
-	return c.JSON(fiber.Map{"message": "Berhasil unfollow user"})
+	return c.JSON(fiber.Map{"message": "User unfollowed successfully"})
 }
 
 func GetPublicFavorites(c *fiber.Ctx) error {
@@ -124,10 +124,10 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 	username := c.Params("username")
 	var user models.User
 	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
 	if !user.IsPublic {
-		return c.Status(403).JSON(fiber.Map{"error": "Profile user private"})
+		return c.Status(403).JSON(fiber.Map{"error": "This user profile is private"})
 	}
 
 	query := database.DB.Preload("Movie").Where("user_id = ?", user.ID)
@@ -139,7 +139,7 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 
 	var entries []models.UserList
 	if err := query.Order("updated_at desc").Find(&entries).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengambil data publik"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch public data"})
 	}
 
 	data := make([]fiber.Map, 0, len(entries))
@@ -149,3 +149,4 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 
 	return c.JSON(fiber.Map{"success": true, "data": data})
 }
+

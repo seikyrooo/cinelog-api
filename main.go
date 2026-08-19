@@ -38,7 +38,7 @@ func main() {
 		Expiration: 1 * time.Minute,
 		LimitReached: func(c *fiber.Ctx) error {
 			return c.Status(429).JSON(fiber.Map{
-				"error": "Terlalu banyak request, mohon tunggu sebentar.",
+				"error": "Too many requests, please try again in a moment.",
 			})
 		},
 	}))
@@ -80,6 +80,8 @@ func main() {
 	meGroup.Post("/follow/:id", controllers.FollowUser)
 	meGroup.Delete("/follow/:id", controllers.UnfollowUser)
 
+	app.Get("/api/trending", controllers.GetTrending)
+	app.Get("/api/discover", controllers.GetDiscover)
 	app.Get("/api/search", controllers.SearchMovies)
 	app.Get("/api/detail", controllers.GetMediaDetail)
 	app.Get("/api/tv/season", controllers.GetTVSeasonEpisodes)
@@ -105,6 +107,6 @@ func main() {
 		port = "3000"
 	}
 
-	log.Printf("Server berjalan di port %s", port)
+	log.Printf("Server running on port %s", port)
 	app.Listen(":" + port)
 }

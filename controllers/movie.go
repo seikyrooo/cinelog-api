@@ -6,51 +6,23 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"cinelog-api/models"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-func SearchMovies(c *fiber.Ctx) error {
-	query := c.Query("q")
-	if query == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Parameter pencarian 'q' wajib diisi"})
-	}
+var tmdbHttpClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
 
-	mediaType := c.Query("type", "all")
-
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY belum dikonfigurasi"})
-	}
-
-	escapedQuery := url.QueryEscape(query)
-	var tmdbURL string
-	if mediaType == "movie" {
-		tmdbURL = "https://api.themoviedb.org/3/search/movie?query=" + escapedQuery + "&api_key=" + apiKey
-	} else if mediaType == "tv" {
-		tmdbURL = "https://api.themoviedb.org/3/search/tv?query=" + escapedQuery + "&api_key=" + apiKey
-	} else {
-		tmdbURL = "https://api.themoviedb.org/3/search/multi?query=" + escapedQuery + "&api_key=" + apiKey
-	}
-
-	resp, err := http.Get(tmdbURL)
-	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil data dari TMDB"})
-	}
-	defer resp.Body.Close()
-
-	var tmdbResp models.TMDBResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal membaca respons dari TMDB"})
-	}
-
-	var filteredResults []models.TMDBMedia
-	for _, item := range tmdbResp.Results {
+func sanitizeTMDBResults(results []models.TMDBMedia, defaultType string) []models.TMDBMedia {
+	var filtered []models.TMDBMedia
+	for _, item := range results {
 		if item.MediaType == "" {
-			if mediaType != "all" {
-				item.MediaType = mediaType
+			if defaultType != "" && defaultType != "all" {
+				item.MediaType = defaultType
 			} else {
 				if item.Title != "" {
 					item.MediaType = "movie"
@@ -67,9 +39,123 @@ func SearchMovies(c *fiber.Ctx) error {
 			if item.ReleaseDate == "" && item.FirstAirDate != "" {
 				item.ReleaseDate = item.FirstAirDate
 			}
-			filteredResults = append(filteredResults, item)
+			filtered = append(filtered, item)
 		}
 	}
+	return filtered
+}
+
+// GetTrending returns trending movies/TV shows from TMDB
+func GetTrending(c *fiber.Ctx) error {
+	mediaType := c.Query("type", "all")
+	timeWindow := c.Query("time", "week")
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
+	}
+
+	if timeWindow != "day" && timeWindow != "week" {
+		timeWindow = "week"
+	}
+
+	validType := "all"
+	if mediaType == "movie" || mediaType == "tv" {
+		validType = mediaType
+	}
+
+	tmdbURL := "https://api.themoviedb.org/3/trending/" + validType + "/" + timeWindow + "?api_key=" + apiKey
+
+	resp, err := tmdbHttpClient.Get(tmdbURL)
+	if err != nil || resp.StatusCode != 200 {
+		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch trending data from TMDB"})
+	}
+	defer resp.Body.Close()
+
+	var tmdbResp models.TMDBResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse TMDB response"})
+	}
+
+	filteredResults := sanitizeTMDBResults(tmdbResp.Results, mediaType)
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    filteredResults,
+	})
+}
+
+// GetDiscover returns top popular or highest rated content
+func GetDiscover(c *fiber.Ctx) error {
+	mediaType := c.Query("type", "movie")
+	sortBy := c.Query("sort", "popularity.desc")
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
+	}
+
+	endpoint := "movie"
+	if mediaType == "tv" {
+		endpoint = "tv"
+	}
+
+	tmdbURL := "https://api.themoviedb.org/3/discover/" + endpoint + "?sort_by=" + sortBy + "&vote_count.gte=100&api_key=" + apiKey
+
+	resp, err := tmdbHttpClient.Get(tmdbURL)
+	if err != nil || resp.StatusCode != 200 {
+		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch discover list from TMDB"})
+	}
+	defer resp.Body.Close()
+
+	var tmdbResp models.TMDBResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse TMDB discover response"})
+	}
+
+	filteredResults := sanitizeTMDBResults(tmdbResp.Results, endpoint)
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    filteredResults,
+	})
+}
+
+func SearchMovies(c *fiber.Ctx) error {
+	query := strings.TrimSpace(c.Query("q"))
+	if query == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Search query parameter 'q' is required"})
+	}
+
+	mediaType := c.Query("type", "all")
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
+	}
+
+	escapedQuery := url.QueryEscape(query)
+	var tmdbURL string
+	if mediaType == "movie" {
+		tmdbURL = "https://api.themoviedb.org/3/search/movie?query=" + escapedQuery + "&api_key=" + apiKey
+	} else if mediaType == "tv" {
+		tmdbURL = "https://api.themoviedb.org/3/search/tv?query=" + escapedQuery + "&api_key=" + apiKey
+	} else {
+		tmdbURL = "https://api.themoviedb.org/3/search/multi?query=" + escapedQuery + "&api_key=" + apiKey
+	}
+
+	resp, err := tmdbHttpClient.Get(tmdbURL)
+	if err != nil || resp.StatusCode != 200 {
+		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch search results from TMDB"})
+	}
+	defer resp.Body.Close()
+
+	var tmdbResp models.TMDBResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse TMDB response"})
+	}
+
+	filteredResults := sanitizeTMDBResults(tmdbResp.Results, mediaType)
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -78,15 +164,15 @@ func SearchMovies(c *fiber.Ctx) error {
 }
 
 func GetMediaDetail(c *fiber.Ctx) error {
-	idStr := c.Query("id")
+	idStr := strings.TrimSpace(c.Query("id"))
 	if idStr == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Parameter 'id' wajib diisi"})
+		return c.Status(400).JSON(fiber.Map{"error": "Parameter 'id' is required"})
 	}
 
 	mediaType := c.Query("type", "movie")
 	apiKey := os.Getenv("TMDB_API_KEY")
 	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY belum dikonfigurasi"})
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
 	}
 
 	var tmdbURL string
@@ -96,15 +182,15 @@ func GetMediaDetail(c *fiber.Ctx) error {
 		tmdbURL = "https://api.themoviedb.org/3/movie/" + idStr + "?append_to_response=credits&api_key=" + apiKey
 	}
 
-	resp, err := http.Get(tmdbURL)
+	resp, err := tmdbHttpClient.Get(tmdbURL)
 	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil detail dari TMDB"})
+		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch media details from TMDB"})
 	}
 	defer resp.Body.Close()
 
 	var detail models.TMDBDetail
 	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal membaca detail dari TMDB"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse media details from TMDB"})
 	}
 
 	var director string
@@ -181,9 +267,9 @@ func GetMediaDetail(c *fiber.Ctx) error {
 			"media_type":        mediaType,
 			"director":          director,
 			"cast":              castStr,
-			"total_seasons":      detail.NumberOfSeasons,
-			"total_episodes":     detail.NumberOfEpisodes,
-			"next_air_date":      nextAirDate,
+			"total_seasons":     detail.NumberOfSeasons,
+			"total_episodes":    detail.NumberOfEpisodes,
+			"next_air_date":     nextAirDate,
 			"next_episode_name": nextEpsName,
 			"media_status":      detail.Status,
 			"seasons":           seasonsList,
@@ -205,29 +291,29 @@ type TMDBSeasonResponse struct {
 }
 
 func GetTVSeasonEpisodes(c *fiber.Ctx) error {
-	idStr := c.Query("id")
-	seasonStr := c.Query("season", "1")
+	idStr := strings.TrimSpace(c.Query("id"))
+	seasonStr := strings.TrimSpace(c.Query("season", "1"))
 
 	if idStr == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Parameter 'id' wajib diisi"})
+		return c.Status(400).JSON(fiber.Map{"error": "Parameter 'id' is required"})
 	}
 
 	apiKey := os.Getenv("TMDB_API_KEY")
 	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY belum dikonfigurasi"})
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
 	}
 
 	tmdbURL := "https://api.themoviedb.org/3/tv/" + idStr + "/season/" + seasonStr + "?api_key=" + apiKey
 
-	resp, err := http.Get(tmdbURL)
+	resp, err := tmdbHttpClient.Get(tmdbURL)
 	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Gagal mengambil daftar episode dari TMDB"})
+		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch season episodes from TMDB"})
 	}
 	defer resp.Body.Close()
 
 	var seasonResp TMDBSeasonResponse
 	if err := json.NewDecoder(resp.Body).Decode(&seasonResp); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal membaca daftar episode dari TMDB"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse season episodes from TMDB"})
 	}
 
 	return c.JSON(fiber.Map{

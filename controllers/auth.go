@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"cinelog-api/database"
@@ -12,7 +13,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Struktur data yang diharapkan dari input user
 type AuthInput struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
@@ -38,75 +38,98 @@ func safeUserResponse(user models.User) fiber.Map {
 	}
 }
 
-// REGISTER USER BARU
+// Register creates a new user
 func Register(c *fiber.Ctx) error {
 	var input AuthInput
-
-	// Parsing JSON dari body request
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Input tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request payload"})
 	}
 
-	// Hash Password menggunakan Bcrypt
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	username := strings.TrimSpace(input.Username)
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	password := input.Password
+
+	if username == "" || email == "" || password == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Username, email, and password are required"})
+	}
+
+	if len(username) < 3 {
+		return c.Status(400).JSON(fiber.Map{"error": "Username must be at least 3 characters long"})
+	}
+
+	if !strings.Contains(email, "@") || !strings.Contains(email, ".") {
+		return c.Status(400).JSON(fiber.Map{"error": "Please provide a valid email address"})
+	}
+
+	if len(password) < 6 {
+		return c.Status(400).JSON(fiber.Map{"error": "Password must be at least 6 characters long"})
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengenkripsi password"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to encrypt password"})
 	}
 
-	// Buat objek User baru
 	user := models.User{
-		Username: input.Username,
-		Email:    input.Email,
+		Username: username,
+		Email:    email,
 		Password: string(hashedPassword),
 		IsPublic: true,
 	}
 
-	// Simpan ke Database
 	if err := database.DB.Create(&user).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Username atau Email sudah terdaftar"})
+		return c.Status(400).JSON(fiber.Map{"error": "Username or email is already registered"})
 	}
 
 	return c.Status(201).JSON(fiber.Map{
-		"message": "User berhasil mendaftar!",
+		"message": "User registered successfully",
 		"user_id": user.ID,
 		"user":    safeUserResponse(user),
 	})
 }
 
-// LOGIN USER & GENERATE JWT
+// Login authenticates user and returns JWT token
 func Login(c *fiber.Ctx) error {
 	var input AuthInput
 	var user models.User
 
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Input tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request payload"})
 	}
 
-	// Cari user berdasarkan email
-	database.DB.Where("email = ?", input.Email).First(&user)
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	password := input.Password
+
+	if email == "" || password == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Email and password are required"})
+	}
+
+	database.DB.Where("LOWER(email) = ?", email).First(&user)
 	if user.ID == 0 {
-		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid email or password"})
 	}
 
-	// Bandingkan password yang diinput dengan hash di database
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Password salah!"})
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid email or password"})
 	}
 
-	// Buat JWT Token
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "cinelog_default_secure_secret_key_123"
+	}
+
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
 	claims["user_id"] = user.ID
-	claims["exp"] = time.Now().Add(time.Hour * 72).Unix() // Token kedaluwarsa dalam 3 hari
+	claims["exp"] = time.Now().Add(time.Hour * 72).Unix() // 3 days expiration
 
-	// Sign token dengan JWT_SECRET dari .env
-	t, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	t, err := token.SignedString([]byte(jwtSecret))
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal membuat token"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate authentication token"})
 	}
 
 	return c.JSON(fiber.Map{
-		"message": "Login berhasil!",
+		"message": "Login successful",
 		"token":   t,
 		"user_id": user.ID,
 		"user":    safeUserResponse(user),
@@ -116,12 +139,12 @@ func Login(c *fiber.Ctx) error {
 func GetMe(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 
 	var user models.User
 	if err := database.DB.First(&user, uint(userIDVal.(float64))).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
 	return c.JSON(fiber.Map{
@@ -133,31 +156,32 @@ func GetMe(c *fiber.Ctx) error {
 func PatchMe(c *fiber.Ctx) error {
 	userIDVal := c.Locals("user_id")
 	if userIDVal == nil {
-		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized access"})
 	}
 
 	var input ProfileInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Input JSON tidak valid"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON input"})
 	}
 
 	var user models.User
 	if err := database.DB.First(&user, uint(userIDVal.(float64))).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "User tidak ditemukan"})
+		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
-	user.Bio = input.Bio
-	user.AvatarURL = input.AvatarURL
+	user.Bio = strings.TrimSpace(input.Bio)
+	user.AvatarURL = strings.TrimSpace(input.AvatarURL)
 	if input.IsPublic != nil {
 		user.IsPublic = *input.IsPublic
 	}
 
 	if err := database.DB.Save(&user).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Gagal menyimpan profile"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update profile"})
 	}
 
 	return c.JSON(fiber.Map{
-		"message": "Profile berhasil diperbarui",
+		"message": "Profile updated successfully",
 		"data":    safeUserResponse(user),
 	})
 }
+

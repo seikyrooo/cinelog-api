@@ -50,6 +50,36 @@ users (1) ───< user_lists / user_media_entries (M) >─── (1) movies /
 
 ---
 
+## 🧹 Database Cleansing & Maintenance Tool
+
+Tool CLI pembersih dan normalisasi database yang aman untuk database production (dilengkapi fitur **Dry-Run** dan **Transactional Rollback**).
+
+### Fitur Pembersihan:
+1. **Normalisasi Status**: Memperbaiki data status yang tidak valid atau null menjadi `plan_to_watch`.
+2. **Clamp Rating**: Menjaga seluruh rating user berada di rentang valid **0.0 – 10.0**.
+3. **Standarisasi Visibility**: Memastikan nilai visibilitas rating dan favorit default ke `public`.
+4. **Pembersihan Data Orphan**: Menghapus baris `user_lists`, `user_tv_progress`, dan `user_follows` yang kehilangan relasi parentnya.
+5. **Sinkronisasi Progress**: Mengoreksi hitungan episode tontonan yang telah berstatus `completed`.
+6. **Prune Media Tak Terpakai** *(opsional)*: Membersihkan cache TMDB di tabel `movies` yang tidak ada di daftar user manapun.
+
+### Cara Menjalankan:
+
+```bash
+# 1. Preview saja tanpa mengubah data (Aman / Dry-Run)
+go run cmd/cleanse/main.go
+
+# 2. Eksekusi pembersihan ke database (Commit Transaction)
+go run cmd/cleanse/main.go -apply
+
+# 3. Eksekusi pembersihan sekaligus prune cache film yang tidak dipakai siapapun
+go run cmd/cleanse/main.go -apply -prune-unused-media
+
+# 4. (Khusus Dev/Testing) Hard Reset / Truncate seluruh tabel
+go run cmd/cleanse/main.go -reset -confirm=CONFIRM_RESET
+```
+
+---
+
 ## 🚀 Jalankan & Update di VPS
 
 ```bash
