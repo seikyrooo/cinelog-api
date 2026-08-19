@@ -221,7 +221,56 @@ func PatchMe(c *fiber.Ctx) error {
 	})
 }
 
-// UploadAvatar handles direct file upload for user avatar with magic-byte validation
+// isValidImage validates genuine image files by magic bytes, standard library detection, and MIME check
+func isValidImage(buf []byte, ext string, reportedMIME string) bool {
+	if len(buf) < 4 {
+		return false
+	}
+
+	// Reject dangerous executable and script signatures
+	s := strings.ToLower(string(buf))
+	if strings.HasPrefix(s, "<?php") || strings.HasPrefix(s, "<script") || strings.HasPrefix(s, "<html>") ||
+		strings.HasPrefix(s, "<!doctype") || strings.HasPrefix(s, "<svg") || strings.HasPrefix(s, "<?xml") ||
+		strings.HasPrefix(s, "\x7felf") || (len(buf) >= 2 && buf[0] == 'M' && buf[1] == 'Z') {
+		return false
+	}
+
+	// 1. JPEG signature: 0xFF 0xD8 0xFF
+	if len(buf) >= 3 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF {
+		return true
+	}
+
+	// 2. PNG signature: 0x89 0x50 0x4E 0x47
+	if len(buf) >= 4 && buf[0] == 0x89 && buf[1] == 0x50 && buf[2] == 0x4E && buf[3] == 0x47 {
+		return true
+	}
+
+	// 3. GIF signature: GIF87a or GIF89a
+	if len(buf) >= 6 && (string(buf[0:6]) == "GIF87a" || string(buf[0:6]) == "GIF89a") {
+		return true
+	}
+
+	// 4. WEBP signature: RIFF....WEBP
+	if len(buf) >= 12 && string(buf[0:4]) == "RIFF" && string(buf[8:12]) == "WEBP" {
+		return true
+	}
+
+	// 5. Standard library MIME sniffing
+	detectedMIME := http.DetectContentType(buf)
+	if detectedMIME == "image/jpeg" || detectedMIME == "image/png" || detectedMIME == "image/webp" || detectedMIME == "image/gif" {
+		return true
+	}
+
+	// 6. Browser reported image header with matching allowed extension
+	if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif") &&
+		strings.HasPrefix(reportedMIME, "image/") {
+		return true
+	}
+
+	return false
+}
+
+// UploadAvatar handles direct file upload for user avatar with robust validation
 func UploadAvatar(c *fiber.Ctx) error {
 	userID, err := GetContextUserID(c)
 	if err != nil {
@@ -233,17 +282,20 @@ func UploadAvatar(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Avatar image file is required"})
 	}
 
-	// 5MB max size
-	if file.Size > 5*1024*1024 {
-		return c.Status(400).JSON(fiber.Map{"error": "Image size exceeds maximum limit of 5MB"})
+	// 10MB max size
+	if file.Size > 10*1024*1024 {
+		return c.Status(400).JSON(fiber.Map{"error": "Image size exceeds maximum limit of 10MB"})
 	}
 
 	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext == "" {
+		ext = ".jpg"
+	}
 	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" && ext != ".gif" {
 		return c.Status(400).JSON(fiber.Map{"error": "Allowed image formats: JPG, PNG, WEBP, GIF"})
 	}
 
-	// Inspect actual file content via Magic Bytes to prevent disguised uploads
+	// Read first 512 bytes for validation
 	src, err := file.Open()
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Failed to open uploaded file for verification"})
@@ -255,17 +307,20 @@ func UploadAvatar(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Failed to inspect file format header"})
 	}
 
-	mimeType := http.DetectContentType(buf[:n])
-	if mimeType != "image/jpeg" && mimeType != "image/png" && mimeType != "image/webp" && mimeType != "image/gif" {
+	reportedMIME := file.Header.Get("Content-Type")
+	if !isValidImage(buf[:n], ext, reportedMIME) {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid file content: only authentic JPG, PNG, WEBP, and GIF images are permitted"})
 	}
 
-	_ = os.MkdirAll("./uploads/avatars", 0755)
+	if err := os.MkdirAll("./uploads/avatars", 0777); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to prepare avatar upload storage directory"})
+	}
+
 	filename := fmt.Sprintf("avatar_%d_%d%s", userID, time.Now().UnixNano(), ext)
 	savePath := filepath.Join("./uploads/avatars", filename)
 
 	if err := c.SaveFile(file, savePath); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to save avatar image file"})
+		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("Failed to save avatar image file: %v", err)})
 	}
 
 	avatarURL := "/uploads/avatars/" + filename
@@ -277,7 +332,7 @@ func UploadAvatar(c *fiber.Ctx) error {
 
 	user.AvatarURL = avatarURL
 	if err := database.DB.Save(&user).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to update user avatar"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update user avatar in database"})
 	}
 
 	return c.JSON(fiber.Map{
