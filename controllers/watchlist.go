@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
@@ -712,10 +711,7 @@ func SyncRadarAirDates(c *fiber.Ctx) error {
 		return err
 	}
 
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
+	apiKey := getTMDBApiKey()
 
 	var watchlist []models.UserList
 	if err := database.DB.Preload("Movie").Where("user_id = ? AND status <> ?", userID, "dropped").Find(&watchlist).Error; err != nil {

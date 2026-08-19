@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"cinelog-api/controllers"
@@ -18,14 +19,15 @@ import (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("Warning: Error loading .env file")
-	}
+	_ = godotenv.Load(".env")
+	_ = godotenv.Load()
+	_ = godotenv.Load("api/.env")
+	_ = godotenv.Load("../.env")
 
 	database.ConnectDB()
 
 	app := fiber.New(fiber.Config{
-		BodyLimit: 10 * 1024 * 1024, // 10MB payload ceiling
+		BodyLimit:    10 * 1024 * 1024, // 10MB payload ceiling
 		ServerHeader: "CineLog",
 	})
 
@@ -52,10 +54,20 @@ func main() {
 
 	app.Use(logger.New())
 
-	// General API rate limiter
+	// General API rate limiter (600 requests / minute)
 	app.Use(limiter.New(limiter.Config{
-		Max:        120,
+		Max:        600,
 		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			clientIP := c.Get("CF-Connecting-IP")
+			if clientIP == "" {
+				clientIP = c.Get("X-Forwarded-For")
+			}
+			if clientIP == "" {
+				clientIP = c.IP()
+			}
+			return strings.Split(clientIP, ",")[0]
+		},
 		LimitReached: func(c *fiber.Ctx) error {
 			return c.Status(429).JSON(fiber.Map{
 				"error": "Too many requests, please try again in a moment.",

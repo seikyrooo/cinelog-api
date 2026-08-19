@@ -77,6 +77,15 @@ func sanitizeTMDBResults(results []models.TMDBMedia, defaultType string) []model
 	return filtered
 }
 
+// getTMDBApiKey retrieves TMDB API key from environment with fallback
+func getTMDBApiKey() string {
+	key := strings.Trim(strings.TrimSpace(os.Getenv("TMDB_API_KEY")), `"'`)
+	if key == "" {
+		return "187521173e41b57a98e7166c7958d95d"
+	}
+	return key
+}
+
 // GetTrending returns trending movies/TV shows from TMDB with in-memory caching
 func GetTrending(c *fiber.Ctx) error {
 	mediaType := c.Query("type", "all")
@@ -100,22 +109,27 @@ func GetTrending(c *fiber.Ctx) error {
 		})
 	}
 
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
-
+	apiKey := getTMDBApiKey()
 	tmdbURL := "https://api.themoviedb.org/3/trending/" + validType + "/" + timeWindow + "?api_key=" + apiKey
 
 	resp, err := tmdbHttpClient.Get(tmdbURL)
 	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch trending data from TMDB"})
+		if cached, ok := getFromCache(cacheKey); ok {
+			return c.JSON(fiber.Map{"success": true, "data": cached, "cached": true})
+		}
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []models.TMDBMedia{},
+		})
 	}
 	defer resp.Body.Close()
 
 	var tmdbResp models.TMDBResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse TMDB response"})
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []models.TMDBMedia{},
+		})
 	}
 
 	filteredResults := sanitizeTMDBResults(tmdbResp.Results, mediaType)
@@ -146,22 +160,28 @@ func GetDiscover(c *fiber.Ctx) error {
 		})
 	}
 
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
+	apiKey := getTMDBApiKey()
 
 	tmdbURL := "https://api.themoviedb.org/3/discover/" + endpoint + "?sort_by=" + sortBy + "&vote_count.gte=100&api_key=" + apiKey
 
 	resp, err := tmdbHttpClient.Get(tmdbURL)
 	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch discover list from TMDB"})
+		if cached, ok := getFromCache(cacheKey); ok {
+			return c.JSON(fiber.Map{"success": true, "data": cached, "cached": true})
+		}
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []models.TMDBMedia{},
+		})
 	}
 	defer resp.Body.Close()
 
 	var tmdbResp models.TMDBResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse TMDB discover response"})
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []models.TMDBMedia{},
+		})
 	}
 
 	filteredResults := sanitizeTMDBResults(tmdbResp.Results, endpoint)
@@ -180,11 +200,7 @@ func SearchMovies(c *fiber.Ctx) error {
 	}
 
 	mediaType := c.Query("type", "all")
-
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
+	apiKey := getTMDBApiKey()
 
 	escapedQuery := url.QueryEscape(query)
 	var tmdbURL string
@@ -198,13 +214,19 @@ func SearchMovies(c *fiber.Ctx) error {
 
 	resp, err := tmdbHttpClient.Get(tmdbURL)
 	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch search results from TMDB"})
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []models.TMDBMedia{},
+		})
 	}
 	defer resp.Body.Close()
 
 	var tmdbResp models.TMDBResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to parse TMDB response"})
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []models.TMDBMedia{},
+		})
 	}
 
 	filteredResults := sanitizeTMDBResults(tmdbResp.Results, mediaType)
@@ -222,10 +244,7 @@ func GetMediaDetail(c *fiber.Ctx) error {
 	}
 
 	mediaType := c.Query("type", "movie")
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
+	apiKey := getTMDBApiKey()
 
 	var tmdbURL string
 	if mediaType == "tv" {
@@ -236,7 +255,12 @@ func GetMediaDetail(c *fiber.Ctx) error {
 
 	resp, err := tmdbHttpClient.Get(tmdbURL)
 	if err != nil || resp.StatusCode != 200 {
-		return c.Status(502).JSON(fiber.Map{"error": "Failed to fetch media details from TMDB"})
+		// Attempt to load from database cache
+		var localMedia models.Media
+		if errDb := database.DB.Where("(tmdb_id = ? OR id = ?) AND media_type = ?", idStr, idStr, mediaType).First(&localMedia).Error; errDb == nil {
+			return c.JSON(fiber.Map{"success": true, "data": localMedia})
+		}
+		return c.Status(404).JSON(fiber.Map{"error": "Media details not available"})
 	}
 	defer resp.Body.Close()
 
@@ -385,11 +409,7 @@ func GetTVSeasonEpisodes(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Parameter 'id' is required"})
 	}
 
-	apiKey := os.Getenv("TMDB_API_KEY")
-	if apiKey == "" {
-		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
-	}
-
+	apiKey := getTMDBApiKey()
 	tmdbURL := "https://api.themoviedb.org/3/tv/" + idStr + "/season/" + seasonStr + "?api_key=" + apiKey
 
 	resp, err := tmdbHttpClient.Get(tmdbURL)
