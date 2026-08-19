@@ -2,8 +2,13 @@ package controllers
 
 import (
 	"fmt"
+	"html"
+	"io"
+	"net/http"
+	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +31,8 @@ type ProfileInput struct {
 	AvatarURL string `json:"avatar_url"`
 	IsPublic  *bool  `json:"is_public"`
 }
+
+var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,30}$`)
 
 func safeUserResponse(user models.User) fiber.Map {
 	return fiber.Map{
@@ -55,16 +62,19 @@ func Register(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Username, email, and password are required"})
 	}
 
-	if len(username) < 3 {
-		return c.Status(400).JSON(fiber.Map{"error": "Username must be at least 3 characters long"})
+	if !usernameRegex.MatchString(username) {
+		return c.Status(400).JSON(fiber.Map{"error": "Username must be 3-30 characters long and contain only letters, numbers, underscores, or hyphens"})
 	}
 
-	if !strings.Contains(email, "@") || !strings.Contains(email, ".") {
+	if _, err := mail.ParseAddress(email); err != nil || len(email) > 100 {
 		return c.Status(400).JSON(fiber.Map{"error": "Please provide a valid email address"})
 	}
 
 	if len(password) < 6 {
 		return c.Status(400).JSON(fiber.Map{"error": "Password must be at least 6 characters long"})
+	}
+	if len(password) > 72 {
+		return c.Status(400).JSON(fiber.Map{"error": "Password cannot exceed 72 characters"})
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -180,8 +190,23 @@ func PatchMe(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
 
-	user.Bio = strings.TrimSpace(input.Bio)
-	user.AvatarURL = strings.TrimSpace(input.AvatarURL)
+	cleanBio := strings.TrimSpace(input.Bio)
+	if len([]rune(cleanBio)) > 500 {
+		return c.Status(400).JSON(fiber.Map{"error": "Bio cannot exceed 500 characters"})
+	}
+	user.Bio = html.EscapeString(cleanBio)
+
+	cleanAvatarURL := strings.TrimSpace(input.AvatarURL)
+	if cleanAvatarURL != "" {
+		if !strings.HasPrefix(cleanAvatarURL, "http://") && !strings.HasPrefix(cleanAvatarURL, "https://") && !strings.HasPrefix(cleanAvatarURL, "/uploads/") && !strings.HasPrefix(cleanAvatarURL, "uploads/") {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid avatar URL format"})
+		}
+		if len(cleanAvatarURL) > 500 {
+			return c.Status(400).JSON(fiber.Map{"error": "Avatar URL is too long"})
+		}
+		user.AvatarURL = cleanAvatarURL
+	}
+
 	if input.IsPublic != nil {
 		user.IsPublic = *input.IsPublic
 	}
@@ -196,7 +221,7 @@ func PatchMe(c *fiber.Ctx) error {
 	})
 }
 
-// UploadAvatar handles direct file upload for user avatar
+// UploadAvatar handles direct file upload for user avatar with magic-byte validation
 func UploadAvatar(c *fiber.Ctx) error {
 	userID, err := GetContextUserID(c)
 	if err != nil {
@@ -216,6 +241,23 @@ func UploadAvatar(c *fiber.Ctx) error {
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" && ext != ".gif" {
 		return c.Status(400).JSON(fiber.Map{"error": "Allowed image formats: JPG, PNG, WEBP, GIF"})
+	}
+
+	// Inspect actual file content via Magic Bytes to prevent disguised uploads
+	src, err := file.Open()
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Failed to open uploaded file for verification"})
+	}
+	buf := make([]byte, 512)
+	n, err := src.Read(buf)
+	src.Close()
+	if err != nil && err != io.EOF {
+		return c.Status(400).JSON(fiber.Map{"error": "Failed to inspect file format header"})
+	}
+
+	mimeType := http.DetectContentType(buf[:n])
+	if mimeType != "image/jpeg" && mimeType != "image/png" && mimeType != "image/webp" && mimeType != "image/gif" {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid file content: only authentic JPG, PNG, WEBP, and GIF images are permitted"})
 	}
 
 	_ = os.MkdirAll("./uploads/avatars", 0755)

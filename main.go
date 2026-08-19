@@ -23,7 +23,20 @@ func main() {
 
 	database.ConnectDB()
 
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		BodyLimit: 10 * 1024 * 1024, // 10MB payload ceiling
+		ServerHeader: "CineLog",
+	})
+
+	// Security Headers Middleware
+	app.Use(func(c *fiber.Ctx) error {
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("X-Frame-Options", "DENY")
+		c.Set("X-XSS-Protection", "1; mode=block")
+		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		return c.Next()
+	})
 
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
@@ -33,6 +46,7 @@ func main() {
 
 	app.Use(logger.New())
 
+	// General API rate limiter
 	app.Use(limiter.New(limiter.Config{
 		Max:        120,
 		Expiration: 1 * time.Minute,
@@ -43,9 +57,21 @@ func main() {
 		},
 	}))
 
+	// Strict Auth Rate Limiter (Brute-force protection: max 15 attempts / 15 mins)
+	authLimiter := limiter.New(limiter.Config{
+		Max:        15,
+		Expiration: 15 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{
+				"error": "Too many authentication attempts. Please try again after 15 minutes.",
+			})
+		},
+	})
+
 	// Ensure uploads directories exist on startup
 	_ = os.MkdirAll("./uploads/posters", 0755)
 	_ = os.MkdirAll("./uploads/backdrops", 0755)
+	_ = os.MkdirAll("./uploads/avatars", 0755)
 
 	// Serve Static Uploaded Images (Posters & Backdrops) locally from VPS
 	app.Static("/uploads", "./uploads")
@@ -54,13 +80,13 @@ func main() {
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"app":    "Cinelog API",
-			"status": "Running smoothly!",
+			"status": "Running smoothly and securely!",
 		})
 	})
 
 	authGroup := app.Group("/api/auth")
-	authGroup.Post("/register", controllers.Register)
-	authGroup.Post("/login", controllers.Login)
+	authGroup.Post("/register", authLimiter, controllers.Register)
+	authGroup.Post("/login", authLimiter, controllers.Login)
 
 	meGroup := app.Group("/api/me")
 	meGroup.Use(middlewares.Protected())

@@ -30,7 +30,11 @@ func Protected() fiber.Handler {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fiber.NewError(fiber.StatusUnauthorized, "Metode signing tidak valid")
 			}
-			return []byte(os.Getenv("JWT_SECRET")), nil
+			secret := os.Getenv("JWT_SECRET")
+			if secret == "" {
+				secret = "cinelog_default_secure_secret_key_123"
+			}
+			return []byte(secret), nil
 		})
 
 		if err != nil || !token.Valid {
