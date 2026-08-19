@@ -450,18 +450,16 @@ func IncrementEpisodeProgress(c *fiber.Ctx) error {
 		totalSeasons = 1
 	}
 
-	// 2. Strict Validation: If already completed or reached max total episodes, do not allow further increments!
-	if userList.Status == "completed" || (totalEps > 0 && userList.EpisodesWatched >= totalEps) {
-		if totalEps > 0 {
-			userList.EpisodesWatched = totalEps
-		}
+	// 2. Validation: If all known episodes are already watched (100%), cap and keep completed
+	if totalEps > 0 && userList.EpisodesWatched >= totalEps {
+		userList.EpisodesWatched = totalEps
 		userList.Status = "completed"
 		userList.SeasonWatched = totalSeasons
 		database.DB.Save(&userList)
 		syncTVProgress(&userList)
 
 		return c.JSON(fiber.Map{
-			"message": "Series already completed! All episodes watched.",
+			"message": "All episodes already watched (100%)",
 			"data":    userList,
 		})
 	}
