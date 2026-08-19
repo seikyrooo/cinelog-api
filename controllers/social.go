@@ -232,21 +232,21 @@ func UnfollowUser(c *fiber.Ctx) error {
 }
 
 func GetUserFollowers(c *fiber.Ctx) error {
-	username := c.Params("username")
+	username := strings.TrimSpace(c.Params("username"))
 	var user models.User
-	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
 
 	var follows []models.UserFollow
-	if err := database.DB.Preload("Follower").Where("following_user_id = ?", user.ID).Find(&follows).Error; err != nil {
+	if err := database.DB.Preload("Follower").Where("following_user_id = ?", user.ID).Order("created_at desc").Find(&follows).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch followers"})
 	}
 
 	currentUserID := getOptionalUserID(c)
-	var results []fiber.Map
+	results := make([]fiber.Map, 0, len(follows))
 	for _, f := range follows {
-		if !f.Follower.IsPublic && f.Follower.ID != currentUserID {
+		if f.Follower.ID == 0 {
 			continue
 		}
 		var isFollowing bool
@@ -270,21 +270,21 @@ func GetUserFollowers(c *fiber.Ctx) error {
 }
 
 func GetUserFollowing(c *fiber.Ctx) error {
-	username := c.Params("username")
+	username := strings.TrimSpace(c.Params("username"))
 	var user models.User
-	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
 
 	var follows []models.UserFollow
-	if err := database.DB.Preload("Following").Where("follower_user_id = ?", user.ID).Find(&follows).Error; err != nil {
+	if err := database.DB.Preload("Following").Where("follower_user_id = ?", user.ID).Order("created_at desc").Find(&follows).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch following list"})
 	}
 
 	currentUserID := getOptionalUserID(c)
-	var results []fiber.Map
+	results := make([]fiber.Map, 0, len(follows))
 	for _, f := range follows {
-		if !f.Following.IsPublic && f.Following.ID != currentUserID {
+		if f.Following.ID == 0 {
 			continue
 		}
 		var isFollowing bool
@@ -316,9 +316,9 @@ func GetPublicRatings(c *fiber.Ctx) error {
 }
 
 func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
-	username := c.Params("username")
+	username := strings.TrimSpace(c.Params("username"))
 	var user models.User
-	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := database.DB.Where("LOWER(username) = ?", strings.ToLower(username)).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
 	currentUserID := getOptionalUserID(c)
@@ -328,9 +328,9 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 
 	query := database.DB.Preload("Movie").Where("user_id = ?", user.ID)
 	if favoritesOnly {
-		query = query.Where("favorite = ? AND visibility_favorite <> ?", true, "private")
+		query = query.Where("favorite = ? AND (visibility_favorite <> ? OR visibility_favorite IS NULL)", true, "private")
 	} else {
-		query = query.Where("rating > 0 AND visibility_rating <> ?", "private")
+		query = query.Where("rating > 0 AND (visibility_rating <> ? OR visibility_rating IS NULL)", "private")
 	}
 
 	var entries []models.UserList

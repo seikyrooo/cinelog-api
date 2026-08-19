@@ -107,11 +107,28 @@ func main() {
 		})
 	})
 
-	authGroup := app.Group("/api/auth")
+	// Register API endpoints with both /api prefix and root prefix
+	// This guarantees requests work seamlessly regardless of whether the reverse-proxy strips /api or not.
+	registerAppRoutes(app.Group("/api"), authLimiter)
+	registerAppRoutes(app, authLimiter)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
+	}
+
+	log.Printf("Server running on port %s", port)
+	app.Listen(":" + port)
+}
+
+func registerAppRoutes(r fiber.Router, authLimiter fiber.Handler) {
+	// Auth
+	authGroup := r.Group("/auth")
 	authGroup.Post("/register", authLimiter, controllers.Register)
 	authGroup.Post("/login", authLimiter, controllers.Login)
 
-	meGroup := app.Group("/api/me")
+	// Me (Protected)
+	meGroup := r.Group("/me")
 	meGroup.Use(middlewares.Protected())
 	meGroup.Get("/", controllers.GetMe)
 	meGroup.Patch("/", controllers.PatchMe)
@@ -132,45 +149,40 @@ func main() {
 	meGroup.Post("/follow/:id", controllers.FollowUser)
 	meGroup.Delete("/follow/:id", controllers.UnfollowUser)
 
-	app.Get("/api/trending", controllers.GetTrending)
-	app.Get("/api/discover", controllers.GetDiscover)
-	app.Get("/api/search", controllers.SearchMovies)
-	app.Get("/api/detail", controllers.GetMediaDetail)
-	app.Get("/api/tv/season", controllers.GetTVSeasonEpisodes)
-	app.Get("/api/users/search", controllers.SearchUsers)
-	app.Get("/api/users/discover", controllers.SearchUsers)
-	app.Get("/api/users/:username", controllers.GetPublicProfile)
-	app.Get("/api/users/:username/followers", controllers.GetUserFollowers)
-	app.Get("/api/users/:username/following", controllers.GetUserFollowing)
-	app.Get("/api/users/:username/favorites", controllers.GetPublicFavorites)
-	app.Get("/api/users/:username/ratings", controllers.GetPublicRatings)
+	// User legacy & aliases (Protected)
+	userGroup := r.Group("/user")
+	userGroup.Use(middlewares.Protected())
+	userGroup.Get("/profile", controllers.GetMe)
+	userGroup.Post("/avatar", controllers.UploadAvatar)
+	userGroup.Get("/watchlist", controllers.GetWatchlist)
+	userGroup.Post("/watchlist", controllers.AddToWatchlist)
+	userGroup.Put("/watchlist/:id", controllers.UpdateWatchlistItem)
+	userGroup.Put("/watchlist/:id/progress", controllers.IncrementEpisodeProgress)
+	userGroup.Put("/watchlist/:id/set-progress", controllers.SetEpisodeWatchedProgress)
+	userGroup.Delete("/watchlist/:id", controllers.DeleteWatchlistItem)
+	userGroup.Get("/watchlist/check/:tmdbId", controllers.CheckWatchlistItem)
 
-	privateGroup := app.Group("/api/user")
-	privateGroup.Use(middlewares.Protected())
+	// Public TMDB
+	r.Get("/trending", controllers.GetTrending)
+	r.Get("/discover", controllers.GetDiscover)
+	r.Get("/search", controllers.SearchMovies)
+	r.Get("/detail", controllers.GetMediaDetail)
+	r.Get("/tv/season", controllers.GetTVSeasonEpisodes)
 
-	privateGroup.Get("/profile", controllers.GetMe)
-	privateGroup.Post("/avatar", controllers.UploadAvatar)
+	// Public Social
+	r.Get("/users/search", controllers.SearchUsers)
+	r.Get("/users/discover", controllers.SearchUsers)
+	r.Get("/users/:username", controllers.GetPublicProfile)
+	r.Get("/users/:username/followers", controllers.GetUserFollowers)
+	r.Get("/users/:username/following", controllers.GetUserFollowing)
+	r.Get("/users/:username/favorites", controllers.GetPublicFavorites)
+	r.Get("/users/:username/ratings", controllers.GetPublicRatings)
 
-	app.Post("/api/avatar", middlewares.Protected(), controllers.UploadAvatar)
-	app.Post("/api/upload/avatar", middlewares.Protected(), controllers.UploadAvatar)
-	app.Post("/api/users/:id/follow", middlewares.Protected(), controllers.FollowUser)
-	app.Delete("/api/users/:id/follow", middlewares.Protected(), controllers.UnfollowUser)
-	app.Post("/api/users/follow/:id", middlewares.Protected(), controllers.FollowUser)
-	app.Delete("/api/users/follow/:id", middlewares.Protected(), controllers.UnfollowUser)
-
-	privateGroup.Get("/watchlist", controllers.GetWatchlist)
-	privateGroup.Post("/watchlist", controllers.AddToWatchlist)
-	privateGroup.Put("/watchlist/:id", controllers.UpdateWatchlistItem)
-	privateGroup.Put("/watchlist/:id/progress", controllers.IncrementEpisodeProgress)
-	privateGroup.Put("/watchlist/:id/set-progress", controllers.SetEpisodeWatchedProgress)
-	privateGroup.Delete("/watchlist/:id", controllers.DeleteWatchlistItem)
-	privateGroup.Get("/watchlist/check/:tmdbId", controllers.CheckWatchlistItem)
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3000"
-	}
-
-	log.Printf("Server running on port %s", port)
-	app.Listen(":" + port)
+	// Direct follow/avatar aliases
+	r.Post("/avatar", middlewares.Protected(), controllers.UploadAvatar)
+	r.Post("/upload/avatar", middlewares.Protected(), controllers.UploadAvatar)
+	r.Post("/users/:id/follow", middlewares.Protected(), controllers.FollowUser)
+	r.Delete("/users/:id/follow", middlewares.Protected(), controllers.UnfollowUser)
+	r.Post("/users/follow/:id", middlewares.Protected(), controllers.FollowUser)
+	r.Delete("/users/follow/:id", middlewares.Protected(), controllers.UnfollowUser)
 }
