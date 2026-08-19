@@ -133,7 +133,9 @@ func GetPublicProfile(c *fiber.Ctx) error {
 	if err := database.DB.Select("id, username, bio, avatar_url, is_public, created_at").Where("username = ?", username).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User profile not found"})
 	}
-	if !user.IsPublic {
+
+	currentUserID := getOptionalUserID(c)
+	if !user.IsPublic && (currentUserID == 0 || currentUserID != user.ID) {
 		return c.Status(403).JSON(fiber.Map{"error": "This user profile is private"})
 	}
 
@@ -149,7 +151,6 @@ func GetPublicProfile(c *fiber.Ctx) error {
 	var followingCount int64
 	database.DB.Model(&models.UserFollow{}).Where("follower_user_id = ?", user.ID).Count(&followingCount)
 
-	currentUserID := getOptionalUserID(c)
 	var isFollowing bool
 	if currentUserID > 0 && currentUserID != user.ID {
 		var follow models.UserFollow
@@ -303,7 +304,8 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 	}
-	if !user.IsPublic {
+	currentUserID := getOptionalUserID(c)
+	if !user.IsPublic && (currentUserID == 0 || currentUserID != user.ID) {
 		return c.Status(403).JSON(fiber.Map{"error": "This user profile is private"})
 	}
 

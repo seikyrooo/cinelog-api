@@ -153,6 +153,10 @@ func main() {
 
 	app.Post("/api/avatar", middlewares.Protected(), controllers.UploadAvatar)
 	app.Post("/api/upload/avatar", middlewares.Protected(), controllers.UploadAvatar)
+	app.Post("/api/users/:id/follow", middlewares.Protected(), controllers.FollowUser)
+	app.Delete("/api/users/:id/follow", middlewares.Protected(), controllers.UnfollowUser)
+	app.Post("/api/users/follow/:id", middlewares.Protected(), controllers.FollowUser)
+	app.Delete("/api/users/follow/:id", middlewares.Protected(), controllers.UnfollowUser)
 
 	privateGroup.Get("/watchlist", controllers.GetWatchlist)
 	privateGroup.Post("/watchlist", controllers.AddToWatchlist)
