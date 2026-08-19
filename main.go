@@ -139,6 +139,9 @@ func main() {
 	privateGroup.Get("/profile", controllers.GetMe)
 	privateGroup.Post("/avatar", controllers.UploadAvatar)
 
+	app.Post("/api/avatar", middlewares.Protected(), controllers.UploadAvatar)
+	app.Post("/api/upload/avatar", middlewares.Protected(), controllers.UploadAvatar)
+
 	privateGroup.Get("/watchlist", controllers.GetWatchlist)
 	privateGroup.Post("/watchlist", controllers.AddToWatchlist)
 	privateGroup.Put("/watchlist/:id", controllers.UpdateWatchlistItem)
