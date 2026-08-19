@@ -69,6 +69,9 @@ func ConnectDB() {
 	// Backfill any NULL or unset is_public in users table to true
 	_ = db.Exec("UPDATE users SET is_public = true WHERE is_public IS NULL").Error
 
+	// Clean up existing usernames with spaces by replacing spaces with underscores
+	_ = db.Exec("UPDATE users SET username = REPLACE(TRIM(username), ' ', '_') WHERE username LIKE '% %'").Error
+
 	log.Println("Database Migration selesai.")
 	DB = db
 }
