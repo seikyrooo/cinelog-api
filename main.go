@@ -88,7 +88,11 @@ func main() {
 	app.Get("/api/search", controllers.SearchMovies)
 	app.Get("/api/detail", controllers.GetMediaDetail)
 	app.Get("/api/tv/season", controllers.GetTVSeasonEpisodes)
+	app.Get("/api/users/search", controllers.SearchUsers)
+	app.Get("/api/users/discover", controllers.SearchUsers)
 	app.Get("/api/users/:username", controllers.GetPublicProfile)
+	app.Get("/api/users/:username/followers", controllers.GetUserFollowers)
+	app.Get("/api/users/:username/following", controllers.GetUserFollowing)
 	app.Get("/api/users/:username/favorites", controllers.GetPublicFavorites)
 	app.Get("/api/users/:username/ratings", controllers.GetPublicRatings)
 
