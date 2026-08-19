@@ -37,3 +37,6 @@ uploads/
 cinelog.db
 *.db
 
+
+cinelog-api
+
