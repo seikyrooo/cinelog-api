@@ -82,6 +82,8 @@ func main() {
 
 	app.Get("/api/trending", controllers.GetTrending)
 	app.Get("/api/discover", controllers.GetDiscover)
+	app.Get("/api/discover/platform", controllers.GetDiscoverByPlatform)
+	app.Get("/api/discover/franchise", controllers.GetDiscoverByFranchise)
 	app.Get("/api/search", controllers.SearchMovies)
 	app.Get("/api/detail", controllers.GetMediaDetail)
 	app.Get("/api/tv/season", controllers.GetTVSeasonEpisodes)

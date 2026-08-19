@@ -357,3 +357,140 @@ func GetTVSeasonEpisodes(c *fiber.Ctx) error {
 		"data":    seasonResp.Episodes,
 	})
 }
+
+// GetDiscoverByPlatform returns trending & popular titles for specific streaming networks
+func GetDiscoverByPlatform(c *fiber.Ctx) error {
+	platform := strings.ToLower(strings.TrimSpace(c.Query("platform", "netflix")))
+	mediaType := c.Query("type", "all")
+	sortBy := c.Query("sort", "popularity.desc")
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
+	}
+
+	var networkID string
+	var providerID string
+
+	switch platform {
+	case "netflix":
+		networkID = "213"
+		providerID = "8"
+	case "disney", "disney+":
+		networkID = "2739"
+		providerID = "337"
+	case "hbo", "max", "hbomax":
+		networkID = "49|3186"
+		providerID = "1899"
+	case "apple", "appletv", "apple_tv":
+		networkID = "2552"
+		providerID = "350"
+	case "prime", "amazon", "amazonprime":
+		networkID = "1024"
+		providerID = "119"
+	case "paramount", "paramount+":
+		networkID = "4330"
+		providerID = "531"
+	case "hulu":
+		networkID = "453"
+		providerID = "15"
+	default:
+		networkID = "213"
+		providerID = "8"
+	}
+
+	var results []models.TMDBMedia
+
+	if mediaType == "tv" || mediaType == "all" {
+		tvURL := "https://api.themoviedb.org/3/discover/tv?with_networks=" + networkID + "&sort_by=" + sortBy + "&vote_count.gte=30&api_key=" + apiKey
+		if resp, err := tmdbHttpClient.Get(tvURL); err == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var tmdbResp models.TMDBResponse
+			if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err == nil {
+				results = append(results, sanitizeTMDBResults(tmdbResp.Results, "tv")...)
+			}
+		}
+	}
+
+	if mediaType == "movie" || mediaType == "all" {
+		movieURL := "https://api.themoviedb.org/3/discover/movie?with_watch_providers=" + providerID + "&watch_region=US&sort_by=" + sortBy + "&vote_count.gte=30&api_key=" + apiKey
+		if resp, err := tmdbHttpClient.Get(movieURL); err == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var tmdbResp models.TMDBResponse
+			if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err == nil {
+				results = append(results, sanitizeTMDBResults(tmdbResp.Results, "movie")...)
+			}
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success":  true,
+		"platform": platform,
+		"data":     results,
+	})
+}
+
+// GetDiscoverByFranchise returns curated titles for major pop-culture universes
+func GetDiscoverByFranchise(c *fiber.Ctx) error {
+	franchise := strings.ToLower(strings.TrimSpace(c.Query("franchise", "marvel")))
+	sortBy := c.Query("sort", "popularity.desc")
+
+	apiKey := os.Getenv("TMDB_API_KEY")
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "TMDB_API_KEY is not configured"})
+	}
+
+	var movieParams string
+	var tvParams string
+
+	switch franchise {
+	case "marvel", "mcu":
+		movieParams = "with_companies=420"
+		tvParams = "with_companies=420"
+	case "dc", "dceu":
+		movieParams = "with_companies=9993|128064"
+		tvParams = "with_companies=9993|128064"
+	case "starwars", "star_wars":
+		movieParams = "with_companies=1"
+		tvParams = "with_companies=1"
+	case "harrypotter", "wizarding_world":
+		movieParams = "with_keywords=616"
+	case "anime", "ghibli":
+		movieParams = "with_companies=10342|with_genres=16"
+		tvParams = "with_genres=16&with_original_language=ja"
+	case "monsterverse", "godzilla":
+		movieParams = "with_keywords=187441|1299"
+	default:
+		movieParams = "with_companies=420"
+	}
+
+	var results []models.TMDBMedia
+
+	if movieParams != "" {
+		movieURL := "https://api.themoviedb.org/3/discover/movie?" + movieParams + "&sort_by=" + sortBy + "&vote_count.gte=20&api_key=" + apiKey
+		if resp, err := tmdbHttpClient.Get(movieURL); err == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var tmdbResp models.TMDBResponse
+			if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err == nil {
+				results = append(results, sanitizeTMDBResults(tmdbResp.Results, "movie")...)
+			}
+		}
+	}
+
+	if tvParams != "" {
+		tvURL := "https://api.themoviedb.org/3/discover/tv?" + tvParams + "&sort_by=" + sortBy + "&vote_count.gte=10&api_key=" + apiKey
+		if resp, err := tmdbHttpClient.Get(tvURL); err == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var tmdbResp models.TMDBResponse
+			if err := json.NewDecoder(resp.Body).Decode(&tmdbResp); err == nil {
+				results = append(results, sanitizeTMDBResults(tmdbResp.Results, "tv")...)
+			}
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success":   true,
+		"franchise": franchise,
+		"data":      results,
+	})
+}
