@@ -38,6 +38,7 @@ type WatchlistInput struct {
 	Rating             float64 `json:"rating"` // 0.0 to 10.0 scale
 	Favorite           bool    `json:"favorite"`
 	Notes              string  `json:"notes"`
+	Review             string  `json:"review"`
 	VisibilityRating   string  `json:"visibility_rating"`
 	VisibilityFavorite string  `json:"visibility_favorite"`
 	SeasonWatched      int     `json:"season_watched"`
@@ -261,6 +262,15 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		seasonW = 1
 	}
 
+	reviewText := input.Review
+	if reviewText == "" {
+		reviewText = input.Notes
+	}
+	notesText := input.Notes
+	if notesText == "" {
+		notesText = input.Review
+	}
+
 	if err != nil {
 		userList = models.UserList{
 			UserID:             userID,
@@ -268,7 +278,8 @@ func AddToWatchlist(c *fiber.Ctx) error {
 			Status:             input.Status,
 			Rating:             input.Rating,
 			Favorite:           input.Favorite,
-			Notes:              input.Notes,
+			Notes:              notesText,
+			Review:             reviewText,
 			VisibilityRating:   input.VisibilityRating,
 			VisibilityFavorite: input.VisibilityFavorite,
 			SeasonWatched:      seasonW,
@@ -283,7 +294,8 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		userList.Status = input.Status
 		userList.Rating = input.Rating
 		userList.Favorite = input.Favorite
-		userList.Notes = input.Notes
+		userList.Notes = notesText
+		userList.Review = reviewText
 		userList.VisibilityRating = input.VisibilityRating
 		userList.VisibilityFavorite = input.VisibilityFavorite
 		userList.SeasonWatched = seasonW
@@ -392,7 +404,18 @@ func UpdateWatchlistItem(c *fiber.Ctx) error {
 	}
 	userList.Rating = normalizeRating(input.Rating)
 	userList.Favorite = input.Favorite
-	userList.Notes = input.Notes
+	if input.Review != "" {
+		userList.Review = input.Review
+		if input.Notes == "" {
+			userList.Notes = input.Review
+		}
+	}
+	if input.Notes != "" {
+		userList.Notes = input.Notes
+		if input.Review == "" {
+			userList.Review = input.Notes
+		}
+	}
 	if input.VisibilityRating != "" {
 		userList.VisibilityRating = normalizeVisibility(input.VisibilityRating)
 	}

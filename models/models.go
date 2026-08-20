@@ -90,6 +90,7 @@ type UserMediaEntry struct {
 	Rating             float64    `gorm:"type:decimal(3,1);default:0.0" json:"rating"`
 	Favorite           bool       `gorm:"default:false" json:"favorite"`
 	Notes              string     `gorm:"type:text" json:"notes"`
+	Review             string     `gorm:"type:text" json:"review"`
 	VisibilityRating   string     `gorm:"type:varchar(20);default:'public'" json:"visibility_rating"`
 	VisibilityFavorite string     `gorm:"type:varchar(20);default:'public'" json:"visibility_favorite"`
 	SeasonWatched      int        `gorm:"default:1" json:"season_watched"`

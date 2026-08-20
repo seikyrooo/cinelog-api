@@ -395,3 +395,83 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 	return c.JSON(fiber.Map{"success": true, "data": data})
 }
 
+// GetSocialFeed returns recent media watch, review, and rating activity feed from followed users or the community
+func GetSocialFeed(c *fiber.Ctx) error {
+	currentUserID := getOptionalUserID(c)
+	limit, _ := strconv.Atoi(c.Query("limit", "30"))
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+	feedType := c.Query("type", "following")
+
+	var followingIDs []uint
+	if currentUserID > 0 {
+		database.DB.Model(&models.UserFollow{}).
+			Where("follower_user_id = ?", currentUserID).
+			Pluck("following_user_id", &followingIDs)
+	}
+
+	query := database.DB.Model(&models.UserList{}).
+		Preload("User").
+		Preload("Movie").
+		Joins("JOIN users ON users.id = user_lists.user_id").
+		Where("users.is_public = true")
+
+	// If filtering by following and user follows accounts, filter to those IDs
+	if feedType == "following" && len(followingIDs) > 0 {
+		query = query.Where("user_lists.user_id IN (?)", followingIDs)
+	}
+
+	var entries []models.UserList
+	if err := query.Order("user_lists.updated_at desc").
+		Limit(limit).
+		Offset(offset).
+		Find(&entries).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch activity feed"})
+	}
+
+	activities := make([]fiber.Map, 0, len(entries))
+	for _, entry := range entries {
+		rev := entry.Review
+		if rev == "" {
+			rev = entry.Notes
+		}
+		notes := entry.Notes
+		if notes == "" {
+			notes = entry.Review
+		}
+
+		activities = append(activities, fiber.Map{
+			"id":               entry.ID,
+			"user_id":          entry.UserID,
+			"status":           entry.Status,
+			"rating":           entry.Rating,
+			"review":           rev,
+			"notes":            notes,
+			"favorite":         entry.Favorite,
+			"season_watched":   entry.SeasonWatched,
+			"episodes_watched": entry.EpisodesWatched,
+			"created_at":       entry.CreatedAt,
+			"updated_at":       entry.UpdatedAt,
+			"user":             publicUserResponse(entry.User),
+			"movie":            entry.Movie,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success":           true,
+		"data":              activities,
+		"page":              page,
+		"limit":             limit,
+		"count":             len(activities),
+		"is_following_feed": feedType == "following" && len(followingIDs) > 0,
+		"following_count":   len(followingIDs),
+	})
+}
+
+

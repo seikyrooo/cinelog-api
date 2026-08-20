@@ -145,7 +145,7 @@ func registerAppRoutes(r fiber.Router, authLimiter fiber.Handler) {
 	meGroup.Put("/library/:id/set-progress", controllers.SetEpisodeWatchedProgress)
 	meGroup.Put("/library/:id/tv-progress", controllers.SetTVProgress)
 	meGroup.Patch("/library/:id/tv-progress", controllers.SetTVProgress)
-	meGroup.Get("/library/check/:tmdbId", controllers.CheckLibraryItem)
+	meGroup.Get("/feed", controllers.GetSocialFeed)
 	meGroup.Post("/follow/:id", controllers.FollowUser)
 	meGroup.Delete("/follow/:id", controllers.UnfollowUser)
 
@@ -167,7 +167,11 @@ func registerAppRoutes(r fiber.Router, authLimiter fiber.Handler) {
 	r.Get("/detail", controllers.GetMediaDetail)
 	r.Get("/tv/season", controllers.GetTVSeasonEpisodes)
 
-	// Public Social
+	// Public Social & Activity Feeds
+	r.Get("/community/activity", controllers.GetSocialFeed)
+	r.Get("/community/feed", controllers.GetSocialFeed)
+	r.Get("/feed", controllers.GetSocialFeed)
+	r.Get("/activity", controllers.GetSocialFeed)
 	r.Get("/users/search", controllers.SearchUsers)
 	r.Get("/users/discover", controllers.SearchUsers)
 	r.Get("/users/:username", controllers.GetPublicProfile)
