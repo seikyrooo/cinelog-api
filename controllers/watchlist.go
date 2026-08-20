@@ -39,6 +39,7 @@ type WatchlistInput struct {
 	Favorite           bool    `json:"favorite"`
 	Notes              string  `json:"notes"`
 	Review             string  `json:"review"`
+	IsPublicFeed       *bool   `json:"is_public_feed"`
 	VisibilityRating   string  `json:"visibility_rating"`
 	VisibilityFavorite string  `json:"visibility_favorite"`
 	SeasonWatched      int     `json:"season_watched"`
@@ -271,15 +272,25 @@ func AddToWatchlist(c *fiber.Ctx) error {
 		notesText = input.Review
 	}
 
+	statusVal := input.Status
+	if input.Rating > 0 && (statusVal == "" || statusVal == "plan_to_watch") {
+		statusVal = "completed"
+	}
+	isPubFeed := true
+	if input.IsPublicFeed != nil {
+		isPubFeed = *input.IsPublicFeed
+	}
+
 	if err != nil {
 		userList = models.UserList{
 			UserID:             userID,
 			MovieID:            movie.ID,
-			Status:             input.Status,
+			Status:             statusVal,
 			Rating:             input.Rating,
 			Favorite:           input.Favorite,
 			Notes:              notesText,
 			Review:             reviewText,
+			IsPublicFeed:       isPubFeed,
 			VisibilityRating:   input.VisibilityRating,
 			VisibilityFavorite: input.VisibilityFavorite,
 			SeasonWatched:      seasonW,
@@ -291,11 +302,14 @@ func AddToWatchlist(c *fiber.Ctx) error {
 			return c.Status(500).JSON(fiber.Map{"error": "Failed to add item to watchlist"})
 		}
 	} else {
-		userList.Status = input.Status
+		userList.Status = statusVal
 		userList.Rating = input.Rating
 		userList.Favorite = input.Favorite
 		userList.Notes = notesText
 		userList.Review = reviewText
+		if input.IsPublicFeed != nil {
+			userList.IsPublicFeed = isPubFeed
+		}
 		userList.VisibilityRating = input.VisibilityRating
 		userList.VisibilityFavorite = input.VisibilityFavorite
 		userList.SeasonWatched = seasonW
@@ -399,11 +413,16 @@ func UpdateWatchlistItem(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON input"})
 	}
 
-	if input.Status != "" {
+	if input.Rating > 0 && (input.Status == "" || input.Status == "plan_to_watch" || userList.Status == "plan_to_watch") {
+		userList.Status = "completed"
+	} else if input.Status != "" {
 		userList.Status = normalizeStatus(input.Status)
 	}
 	userList.Rating = normalizeRating(input.Rating)
 	userList.Favorite = input.Favorite
+	if input.IsPublicFeed != nil {
+		userList.IsPublicFeed = *input.IsPublicFeed
+	}
 	if input.Review != "" {
 		userList.Review = input.Review
 		if input.Notes == "" {

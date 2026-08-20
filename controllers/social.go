@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"cinelog-api/database"
 	"cinelog-api/models"
@@ -421,7 +422,7 @@ func GetSocialFeed(c *fiber.Ctx) error {
 		Preload("User").
 		Preload("Movie").
 		Joins("JOIN users ON users.id = user_lists.user_id").
-		Where("users.is_public = true")
+		Where("users.is_public = true AND user_lists.rating > 0 AND (user_lists.is_public_feed = true OR user_lists.is_public_feed IS NULL)")
 
 	// If filtering by following: include accounts the user follows PLUS their own activity!
 	if feedType == "following" && currentUserID > 0 {
@@ -497,6 +498,8 @@ func GetSocialFeed(c *fiber.Ctx) error {
 			notes = entry.Review
 		}
 
+		isEdited := entry.UpdatedAt.Sub(entry.CreatedAt) > 1*time.Minute
+
 		activities = append(activities, fiber.Map{
 			"id":               entry.ID,
 			"user_id":          entry.UserID,
@@ -505,10 +508,12 @@ func GetSocialFeed(c *fiber.Ctx) error {
 			"review":           rev,
 			"notes":            notes,
 			"favorite":         entry.Favorite,
+			"is_public_feed":   entry.IsPublicFeed,
 			"season_watched":   entry.SeasonWatched,
 			"episodes_watched": entry.EpisodesWatched,
 			"created_at":       entry.CreatedAt,
 			"updated_at":       entry.UpdatedAt,
+			"is_edited":        isEdited,
 			"user":             publicUserResponse(entry.User),
 			"movie":            entry.Movie,
 			"likes_count":      likesCountMap[entry.ID],
