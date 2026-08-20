@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"strconv"
@@ -395,7 +396,7 @@ func getPublicEntries(c *fiber.Ctx, favoritesOnly bool) error {
 	return c.JSON(fiber.Map{"success": true, "data": data})
 }
 
-// GetSocialFeed returns recent media watch, review, and rating activity feed from followed users or the community
+// GetSocialFeed returns recent media watch, review, and rating activity feed from followed users (and self) or the community
 func GetSocialFeed(c *fiber.Ctx) error {
 	currentUserID := getOptionalUserID(c)
 	limit, _ := strconv.Atoi(c.Query("limit", "30"))
@@ -422,8 +423,11 @@ func GetSocialFeed(c *fiber.Ctx) error {
 		Joins("JOIN users ON users.id = user_lists.user_id").
 		Where("users.is_public = true")
 
-	// If filtering by following and user follows accounts, filter to those IDs
-	if feedType == "following" && len(followingIDs) > 0 {
+	// If filtering by following: include accounts the user follows PLUS their own activity!
+	if feedType == "following" && currentUserID > 0 {
+		feedUserIDs := append(followingIDs, currentUserID)
+		query = query.Where("user_lists.user_id IN (?)", feedUserIDs)
+	} else if feedType == "following" && len(followingIDs) > 0 {
 		query = query.Where("user_lists.user_id IN (?)", followingIDs)
 	}
 
@@ -433,6 +437,53 @@ func GetSocialFeed(c *fiber.Ctx) error {
 		Offset(offset).
 		Find(&entries).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch activity feed"})
+	}
+
+	// Batch gather entry IDs for like and comment aggregations
+	entryIDs := make([]uint, 0, len(entries))
+	for _, e := range entries {
+		entryIDs = append(entryIDs, e.ID)
+	}
+
+	// Map of likes count
+	likesCountMap := make(map[uint]int64)
+	userLikedMap := make(map[uint]bool)
+	commentsCountMap := make(map[uint]int64)
+
+	if len(entryIDs) > 0 {
+		type CountResult struct {
+			UserMediaEntryID uint
+			Total            int64
+		}
+		var likeCounts []CountResult
+		database.DB.Model(&models.ActivityLike{}).
+			Select("user_media_entry_id, count(*) as total").
+			Where("user_media_entry_id IN (?)", entryIDs).
+			Group("user_media_entry_id").
+			Scan(&likeCounts)
+		for _, lc := range likeCounts {
+			likesCountMap[lc.UserMediaEntryID] = lc.Total
+		}
+
+		if currentUserID > 0 {
+			var userLikes []uint
+			database.DB.Model(&models.ActivityLike{}).
+				Where("user_id = ? AND user_media_entry_id IN (?)", currentUserID, entryIDs).
+				Pluck("user_media_entry_id", &userLikes)
+			for _, id := range userLikes {
+				userLikedMap[id] = true
+			}
+		}
+
+		var commentCounts []CountResult
+		database.DB.Model(&models.ActivityComment{}).
+			Select("user_media_entry_id, count(*) as total").
+			Where("user_media_entry_id IN (?)", entryIDs).
+			Group("user_media_entry_id").
+			Scan(&commentCounts)
+		for _, cc := range commentCounts {
+			commentsCountMap[cc.UserMediaEntryID] = cc.Total
+		}
 	}
 
 	activities := make([]fiber.Map, 0, len(entries))
@@ -460,6 +511,9 @@ func GetSocialFeed(c *fiber.Ctx) error {
 			"updated_at":       entry.UpdatedAt,
 			"user":             publicUserResponse(entry.User),
 			"movie":            entry.Movie,
+			"likes_count":      likesCountMap[entry.ID],
+			"is_liked":         userLikedMap[entry.ID],
+			"comments_count":   commentsCountMap[entry.ID],
 		})
 	}
 
@@ -469,9 +523,289 @@ func GetSocialFeed(c *fiber.Ctx) error {
 		"page":              page,
 		"limit":             limit,
 		"count":             len(activities),
-		"is_following_feed": feedType == "following" && len(followingIDs) > 0,
+		"is_following_feed": feedType == "following",
 		"following_count":   len(followingIDs),
 	})
+}
+
+// ToggleActivityLike likes or unlikes an activity entry
+func ToggleActivityLike(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	activityID, err := strconv.Atoi(c.Params("id"))
+	if err != nil || activityID <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid activity ID"})
+	}
+
+	var entry models.UserList
+	if err := database.DB.Preload("Movie").First(&entry, activityID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Activity entry not found"})
+	}
+
+	var existingLike models.ActivityLike
+	findErr := database.DB.Where("user_id = ? AND user_media_entry_id = ?", userID, activityID).First(&existingLike).Error
+
+	var liked bool
+	if findErr == nil {
+		// Unlike
+		database.DB.Delete(&existingLike)
+		liked = false
+	} else {
+		// Like
+		newLike := models.ActivityLike{
+			UserID:           userID,
+			UserMediaEntryID: uint(activityID),
+		}
+		database.DB.Create(&newLike)
+		liked = true
+
+		// Trigger notification to the entry owner if not self
+		if entry.UserID != userID {
+			var actor models.User
+			database.DB.First(&actor, userID)
+
+			movieTitle := entry.Movie.Title
+			if movieTitle == "" {
+				movieTitle = "movie / series"
+			}
+			msg := fmt.Sprintf("@%s liked your log on %s", actor.Username, movieTitle)
+
+			notif := models.Notification{
+				RecipientUserID:  entry.UserID,
+				ActorUserID:      userID,
+				UserMediaEntryID: entry.ID,
+				Type:             "like",
+				Message:          msg,
+				IsRead:           false,
+			}
+			database.DB.Create(&notif)
+		}
+	}
+
+	var likesCount int64
+	database.DB.Model(&models.ActivityLike{}).Where("user_media_entry_id = ?", activityID).Count(&likesCount)
+
+	return c.JSON(fiber.Map{
+		"success":     true,
+		"liked":       liked,
+		"likes_count": likesCount,
+	})
+}
+
+// GetActivityComments retrieves all comments for an activity entry
+func GetActivityComments(c *fiber.Ctx) error {
+	activityID, err := strconv.Atoi(c.Params("id"))
+	if err != nil || activityID <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid activity ID"})
+	}
+
+	var comments []models.ActivityComment
+	if err := database.DB.Preload("User").
+		Where("user_media_entry_id = ?", activityID).
+		Order("created_at asc").
+		Find(&comments).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch comments"})
+	}
+
+	data := make([]fiber.Map, 0, len(comments))
+	for _, comm := range comments {
+		data = append(data, fiber.Map{
+			"id":         comm.ID,
+			"user_id":    comm.UserID,
+			"content":    comm.Content,
+			"created_at": comm.CreatedAt,
+			"updated_at": comm.UpdatedAt,
+			"user":       publicUserResponse(comm.User),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    data,
+		"count":   len(data),
+	})
+}
+
+// PostActivityComment adds a new comment to an activity entry
+func PostActivityComment(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	activityID, err := strconv.Atoi(c.Params("id"))
+	if err != nil || activityID <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid activity ID"})
+	}
+
+	type CommentInput struct {
+		Content string `json:"content"`
+	}
+	var input CommentInput
+	if err := c.BodyParser(&input); err != nil || strings.TrimSpace(input.Content) == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Comment content cannot be empty"})
+	}
+
+	var entry models.UserList
+	if err := database.DB.Preload("Movie").First(&entry, activityID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Activity entry not found"})
+	}
+
+	comment := models.ActivityComment{
+		UserID:           userID,
+		UserMediaEntryID: uint(activityID),
+		Content:          strings.TrimSpace(input.Content),
+	}
+	if err := database.DB.Create(&comment).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to save comment"})
+	}
+
+	// Preload author user
+	database.DB.Preload("User").First(&comment, comment.ID)
+
+	// Trigger notification to the entry owner if not self
+	if entry.UserID != userID {
+		snippet := input.Content
+		if len(snippet) > 40 {
+			snippet = snippet[:40] + "..."
+		}
+		msg := fmt.Sprintf("@%s commented on your log: \"%s\"", comment.User.Username, snippet)
+
+		notif := models.Notification{
+			RecipientUserID:  entry.UserID,
+			ActorUserID:      userID,
+			UserMediaEntryID: entry.ID,
+			Type:             "comment",
+			Message:          msg,
+			IsRead:           false,
+		}
+		database.DB.Create(&notif)
+	}
+
+	var commentsCount int64
+	database.DB.Model(&models.ActivityComment{}).Where("user_media_entry_id = ?", activityID).Count(&commentsCount)
+
+	return c.Status(201).JSON(fiber.Map{
+		"success":        true,
+		"data":           comment,
+		"comments_count": commentsCount,
+	})
+}
+
+// DeleteActivityComment removes a comment by its author
+func DeleteActivityComment(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	commentID, err := strconv.Atoi(c.Params("commentId"))
+	if err != nil || commentID <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid comment ID"})
+	}
+
+	var comment models.ActivityComment
+	if err := database.DB.Where("id = ? AND user_id = ?", commentID, userID).First(&comment).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Comment not found or permission denied"})
+	}
+
+	database.DB.Delete(&comment)
+	return c.JSON(fiber.Map{"success": true, "message": "Comment deleted"})
+}
+
+// GetNotifications returns user's notifications with unread count
+func GetNotifications(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	var notifications []models.Notification
+	if err := database.DB.Preload("Actor").
+		Where("recipient_user_id = ?", userID).
+		Order("created_at desc").
+		Limit(30).
+		Find(&notifications).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch notifications"})
+	}
+
+	var unreadCount int64
+	database.DB.Model(&models.Notification{}).
+		Where("recipient_user_id = ? AND is_read = false", userID).
+		Count(&unreadCount)
+
+	data := make([]fiber.Map, 0, len(notifications))
+	for _, n := range notifications {
+		data = append(data, fiber.Map{
+			"id":                  n.ID,
+			"type":                n.Type,
+			"message":             n.Message,
+			"is_read":             n.IsRead,
+			"user_media_entry_id": n.UserMediaEntryID,
+			"created_at":          n.CreatedAt,
+			"actor":               publicUserResponse(n.Actor),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success":      true,
+		"data":         data,
+		"unread_count": unreadCount,
+	})
+}
+
+// GetUnreadNotificationCount returns just the count for navbar badges
+func GetUnreadNotificationCount(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	var unreadCount int64
+	database.DB.Model(&models.Notification{}).
+		Where("recipient_user_id = ? AND is_read = false", userID).
+		Count(&unreadCount)
+
+	return c.JSON(fiber.Map{
+		"success":      true,
+		"unread_count": unreadCount,
+	})
+}
+
+// MarkNotificationAsRead marks a single notification as read
+func MarkNotificationAsRead(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	notifID, err := strconv.Atoi(c.Params("id"))
+	if err != nil || notifID <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid notification ID"})
+	}
+
+	database.DB.Model(&models.Notification{}).
+		Where("id = ? AND recipient_user_id = ?", notifID, userID).
+		Update("is_read", true)
+
+	return c.JSON(fiber.Map{"success": true})
+}
+
+// MarkAllNotificationsAsRead marks all user notifications as read
+func MarkAllNotificationsAsRead(c *fiber.Ctx) error {
+	userID, err := GetContextUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	database.DB.Model(&models.Notification{}).
+		Where("recipient_user_id = ? AND is_read = false", userID).
+		Update("is_read", true)
+
+	return c.JSON(fiber.Map{"success": true, "message": "All notifications marked as read"})
 }
 
 

@@ -138,6 +138,51 @@ func (UserFollow) TableName() string {
 	return "user_follows"
 }
 
+type ActivityLike struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	UserID           uint      `gorm:"not null;uniqueIndex:idx_user_entry_like" json:"user_id"`
+	UserMediaEntryID uint      `gorm:"not null;uniqueIndex:idx_user_entry_like" json:"user_media_entry_id"`
+	CreatedAt        time.Time `json:"created_at"`
+
+	User User `gorm:"foreignKey:UserID" json:"user,omitempty"`
+}
+
+func (ActivityLike) TableName() string {
+	return "activity_likes"
+}
+
+type ActivityComment struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	UserID           uint      `gorm:"not null;index" json:"user_id"`
+	UserMediaEntryID uint      `gorm:"not null;index" json:"user_media_entry_id"`
+	Content          string    `gorm:"type:text;not null" json:"content"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+
+	User User `gorm:"foreignKey:UserID" json:"user,omitempty"`
+}
+
+func (ActivityComment) TableName() string {
+	return "activity_comments"
+}
+
+type Notification struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	RecipientUserID  uint      `gorm:"not null;index" json:"recipient_user_id"`
+	ActorUserID      uint      `gorm:"not null" json:"actor_user_id"`
+	UserMediaEntryID uint      `json:"user_media_entry_id,omitempty"`
+	Type             string    `gorm:"type:varchar(30);not null" json:"type"` // "like", "comment", "follow"
+	Message          string    `gorm:"type:text" json:"message"`
+	IsRead           bool      `gorm:"default:false;index" json:"is_read"`
+	CreatedAt        time.Time `json:"created_at"`
+
+	Actor User `gorm:"foreignKey:ActorUserID" json:"actor,omitempty"`
+}
+
+func (Notification) TableName() string {
+	return "notifications"
+}
+
 // Legacy aliases agar controller lama tetap bisa memakai naming saat ini.
 type Movie = Media
 type UserList = UserMediaEntry

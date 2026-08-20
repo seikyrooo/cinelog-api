@@ -148,6 +148,14 @@ func registerAppRoutes(r fiber.Router, authLimiter fiber.Handler) {
 	meGroup.Get("/feed", controllers.GetSocialFeed)
 	meGroup.Post("/follow/:id", controllers.FollowUser)
 	meGroup.Delete("/follow/:id", controllers.UnfollowUser)
+	meGroup.Get("/notifications", controllers.GetNotifications)
+	meGroup.Get("/notifications/unread-count", controllers.GetUnreadNotificationCount)
+	meGroup.Put("/notifications/read-all", controllers.MarkAllNotificationsAsRead)
+	meGroup.Put("/notifications/:id/read", controllers.MarkNotificationAsRead)
+	meGroup.Post("/activity/:id/like", controllers.ToggleActivityLike)
+	meGroup.Get("/activity/:id/comments", controllers.GetActivityComments)
+	meGroup.Post("/activity/:id/comments", controllers.PostActivityComment)
+	meGroup.Delete("/activity/comments/:commentId", controllers.DeleteActivityComment)
 
 	// User legacy & aliases (Protected with explicit middleware per route to avoid prefix collision with /users)
 	r.Get("/user/profile", middlewares.Protected(), controllers.GetMe)
@@ -187,4 +195,14 @@ func registerAppRoutes(r fiber.Router, authLimiter fiber.Handler) {
 	r.Delete("/users/:id/follow", middlewares.Protected(), controllers.UnfollowUser)
 	r.Post("/users/follow/:id", middlewares.Protected(), controllers.FollowUser)
 	r.Delete("/users/follow/:id", middlewares.Protected(), controllers.UnfollowUser)
+
+	// Activity & Notification aliases
+	r.Get("/activity/:id/comments", controllers.GetActivityComments)
+	r.Post("/activity/:id/like", middlewares.Protected(), controllers.ToggleActivityLike)
+	r.Post("/activity/:id/comments", middlewares.Protected(), controllers.PostActivityComment)
+	r.Delete("/activity/comments/:commentId", middlewares.Protected(), controllers.DeleteActivityComment)
+	r.Get("/notifications", middlewares.Protected(), controllers.GetNotifications)
+	r.Get("/notifications/unread-count", middlewares.Protected(), controllers.GetUnreadNotificationCount)
+	r.Put("/notifications/read-all", middlewares.Protected(), controllers.MarkAllNotificationsAsRead)
+	r.Put("/notifications/:id/read", middlewares.Protected(), controllers.MarkNotificationAsRead)
 }

@@ -61,6 +61,9 @@ func ConnectDB() {
 		&models.UserMediaEntry{},
 		&models.UserTVProgress{},
 		&models.UserFollow{},
+		&models.ActivityLike{},
+		&models.ActivityComment{},
+		&models.Notification{},
 	)
 	if err != nil {
 		log.Fatal("Gagal migrasi database! \n", err)
