@@ -75,6 +75,15 @@ func ConnectDB() {
 	// Clean up existing usernames with spaces by replacing spaces with underscores
 	_ = db.Exec("UPDATE users SET username = REPLACE(TRIM(username), ' ', '_') WHERE username LIKE '% %'").Error
 
+	// Automatically convert all rated movie watchlist items (rating > 0) to 'completed' (watched)
+	_ = db.Exec(`
+		UPDATE user_lists 
+		SET status = 'completed' 
+		WHERE rating > 0 
+		  AND status <> 'completed'
+		  AND movie_id IN (SELECT id FROM movies WHERE media_type = 'movie')
+	`).Error
+
 	log.Println("Database Migration selesai.")
 	DB = db
 }

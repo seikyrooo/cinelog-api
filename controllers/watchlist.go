@@ -273,7 +273,9 @@ func AddToWatchlist(c *fiber.Ctx) error {
 	}
 
 	statusVal := input.Status
-	if input.Rating > 0 && (statusVal == "" || statusVal == "plan_to_watch") {
+	if (input.MediaType == "movie" || movie.MediaType == "movie") && input.Rating > 0 {
+		statusVal = "completed"
+	} else if input.Rating > 0 && (statusVal == "" || statusVal == "plan_to_watch") {
 		statusVal = "completed"
 	}
 	isPubFeed := true
@@ -413,7 +415,10 @@ func UpdateWatchlistItem(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON input"})
 	}
 
-	if input.Rating > 0 && (input.Status == "" || input.Status == "plan_to_watch" || userList.Status == "plan_to_watch") {
+	isMovie := (userList.Movie.MediaType == "movie" || input.MediaType == "movie")
+	if isMovie && input.Rating > 0 {
+		userList.Status = "completed"
+	} else if input.Rating > 0 && (input.Status == "" || input.Status == "plan_to_watch" || userList.Status == "plan_to_watch") {
 		userList.Status = "completed"
 	} else if input.Status != "" {
 		userList.Status = normalizeStatus(input.Status)
