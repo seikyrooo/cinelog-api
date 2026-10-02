@@ -1,0 +1,22 @@
+when:
+  event: [push, manual]
+  branch: [main, master]
+
+steps:
+  - name: build-and-deploy
+    image: docker:cli
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro
+      - /home/lenovo/.kube/config:/root/.kube/config:ro
+      - /home/lenovo/.minikube:/home/lenovo/.minikube:ro
+    commands:
+      - echo "🔨 1. Building Cinelog API Docker Image..."
+      - docker build -t cinelog-api:local .
+      - echo "📦 2. Loading Image into Minikube containerd..."
+      - docker save cinelog-api:local | docker exec -i minikube ctr -n k8s.io images import -
+      - echo "🚀 3. Triggering Rollout Restart in Minikube..."
+      - kubectl rollout restart deployment/cinelog-api -n cinelog
+      - kubectl rollout status deployment/cinelog-api -n cinelog --timeout=60s
+      - echo "✅ Deploy Cinelog API Successful!"
